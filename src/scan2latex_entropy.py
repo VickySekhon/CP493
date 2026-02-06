@@ -1,17 +1,39 @@
 # python3 src/scan2latex_entropy.py --top-k 1 --window-size 5 --top-m 10 data/images/3200797037.jpg
 
-# python scan2latex_entropy.py -h
-
 #!/usr/bin/env python3
-import os, sys, time, math, base64, argparse, heapq, dotenv
+import os, sys, time, math, base64, argparse, heapq, dotenv, io
 from pathlib import Path
+from datetime import datetime
 from openai import OpenAI
+
+
+# ─────────────── logging setup ────────────────────────────────
+class TeeOutput:
+    """Captures all print output while also displaying to console."""
+    def __init__(self, original_stdout):
+        self.original_stdout = original_stdout
+        self.buffer = io.StringIO()
+
+    def write(self, text):
+        self.original_stdout.write(text)
+        self.buffer.write(text)
+
+    def flush(self):
+        self.original_stdout.flush()
+
+    def get_log(self):
+        return self.buffer.getvalue()
+
+
+# Redirect stdout to capture all print statements
+_tee = TeeOutput(sys.stdout)
+sys.stdout = _tee
 
 # ─────────────── configuration ───────────────────────────────
 MODEL = "gpt-4o"  # must support logprobs
 TOKEN_PRINT_LIMIT = 3  # diagnostics: how many tokens to show
-EXCLUDE_TOKENS = {"```", "python", "", " ", "\n", "latex", "json", "tag"}
-LOG2 = math.log(2)  # ln 2  (nat → bit)
+EXCLUDE_TOKENS = {"```", "python", "", " ", "\n", "latex", "json", "tag", ""}
+LOG2 = math.log(2)  # ln 2  (nat → bit), base not specified = natural log of 2
 
 dotenv.load_dotenv()
 
@@ -196,34 +218,48 @@ tok_infos = [
     for t in choice.logprobs.content
     if t.token not in EXCLUDE_TOKENS and t.token.strip()
 ]
+#print(f"Logprobs: {tok_infos}\n\n")
+write_path = "data/log-probs/1.txt"
+with open(write_path, "w", encoding="utf-8") as f2:
+    f2.writelines(str(tok_infos)) 
+
 N = len(tok_infos)
 if N == 0:
     sys.exit("No tokens to analyse.")
+    
+def calculate_shannon_entropy(p):
+    return p * math.log(p, 2)    
 
 # ─────────────── per-token entropy + totals ───────────────────
 total_H = 0.0
-pos_entropy = []  # store H of each position for windows
+pos_entropy = []  # store entropy of each position for sliding window
 
-for info in tok_infos:
+for info in tok_infos: # a given token
     H_pos, mass = 0.0, 0.0
-    for alt in info.top_logprobs[:TOP_K]:
-        p = math.exp(alt.logprob)
+    for alt in info.top_logprobs[:TOP_K]: # find top k logprobs
+        p = math.exp(alt.logprob) # get the orignal probability
+        mass += p
         if p == 0.0:
             continue
-        H_pos += -p * alt.logprob / LOG2  # −p ln p  (→ bits)
-        mass += p
+        #H_pos += -p * alt.logprob / LOG2  # −p ln p  (→ bits)
+        H_pos += calculate_shannon_entropy(p) # entropy calc -p * log_2(p)
 
-    p_tail = max(0.0, 1.0 - mass)  # residual prob.
+    #p_tail = max(0.0, 1.0 - mass)  # residual prob.
+    p_tail = 1.0 - mass  # residual prob.
+    
     if p_tail > 0.0:
-        H_pos += -p_tail * math.log(p_tail) / LOG2
+        #H_pos += -p_tail * math.log(p_tail) / LOG2
+        H_pos += calculate_shannon_entropy(p_tail)
 
+    H_pos = -H_pos # convert entropy to positive
     total_H += H_pos
     pos_entropy.append(H_pos)
 
-avg_H = total_H / N
+avg_H = total_H / N # page-level statistic
 print(f"Observed tokens: {N}")
 print(f"Top-k entropy  (k={TOP_K}): {total_H:.6f} bits")
 print(f"Average bits/token         : {avg_H:.6f} bits/token")
+print(f"Total tokens: {len(pos_entropy)}")
 
 # ─────────────── sliding-window entropy ───────────────────────
 if W <= 0:
@@ -238,11 +274,15 @@ else:
     window_sum = sum(pos_entropy[:W])
     windows = [(window_sum / W, 0)]  # (avg, start_idx)
 
-    for start in range(1, N - W + 1):
-        window_sum += pos_entropy[start + W - 1] - pos_entropy[start - 1]
-        windows.append((window_sum / W, start))
+    # for start in range(1, N - W + 1): # N = # of different tokens
+    #     window_sum += pos_entropy[start + W - 1] - pos_entropy[start - 1]
+    #     windows.append((window_sum / W, start))
 
-    # pick top-M windows with largest average entropy
+    for start in range(N - W): # N = # of different tokens
+        window_sum += pos_entropy[start + W] - pos_entropy[start]
+        windows.append((window_sum / W, start+1)) # don't overwrite last window_sum
+
+    # pick top-M windows with largest average entropy (O(n))
     top_windows = heapq.nlargest(TOP_M, windows, key=lambda x: x[0])
 
     print(
@@ -269,3 +309,16 @@ if tail:
     print(f"\nLast  {len(tail)} tokens (+ top-k probs):")
     for t in tail:
         print(f"  {t.token!r} → {pretty(t.top_logprobs)}")
+
+# ─────────────── write log file ───────────────────────────────
+log_dir = Path(os.getcwd()) / "data" / "logs"
+log_dir.mkdir(parents=True, exist_ok=True)
+
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_file = log_dir / f"log_{timestamp}.txt"
+
+try:
+    log_file.write_text(_tee.get_log(), encoding="utf-8")
+    print(f"\n📝 Log saved to: {log_file}")
+except Exception as e:
+    print(f"\n❌ Error writing log file: {e}")

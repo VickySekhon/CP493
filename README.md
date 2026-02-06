@@ -29,3 +29,18 @@
           - python-dotenv (or similar)
           - openai
 
+# My Notes
+- logprobs returns logprob = ln(probability) for a given token. To get the actual probability back (0-1 range) we take e^logprob.
+e.g.
+
+1.
+ln(10) = 2.30
+    |       |
+original p  logprob
+
+2.
+e^2.30 = 10
+
+- the way logprobs work is 0 = 100% probability, <0 = lower probabilities. Whereas, the way entropy works is 0 = 0 uncertainty probability, 1 = alot of uncertainty from equally likely outcomes.
+- top-logprobs is restricted to max of 5.
+- can plot to understand relationship (ln(x) = lobprob, e^x = probability)
