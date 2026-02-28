@@ -134,6 +134,8 @@ def make_full_latex(latex_output: str) -> str:
 
     return header + cleaned + footer
 
+def get_probability(logprob):
+    return math.exp(logprob)
 
 # ─────────────── OpenAI client ────────────────────────────────
 api_key = os.getenv("OPENAI_API_KEY")
@@ -183,7 +185,7 @@ def chat(msgs):
                 temperature=0.5, # High = more creative, Low = more focused
                 top_p=0.9, # Model looks at the top 90% of tokens it generates
                 n=1, # Controls how much model repeats itself (-2 - 2, with '+' value being penalize for repetition
-                seed=12345, # Give same seed ever run to try to make model responses predictable
+                seed=12345, # Give same seed every run to try to make model responses predictable
                 max_tokens=10_000, # Highest # of tokens model will generate in response 
                 logprobs=True,
                 top_logprobs=TOP_K,
@@ -238,10 +240,12 @@ for info in tok_infos:
     top_k_logprobs = info.top_logprobs[:TOP_K]
     # loop through top k logprobs
     for alt in top_k_logprobs:
-        # get the orignal probability
-        p = math.exp(alt.logprob)
+        
+        # Convert to probability value
+        p = get_probability(alt.logprob)
         mass += p
 
+        # log(0) is undefined
         if p == 0.0:
             continue
 
@@ -249,7 +253,6 @@ for info in tok_infos:
 
     # Residual probability
     p_tail = 1.0 - mass
-
     if p_tail > 0.0:
         H_pos += calculate_shannon_entropy(p_tail)
 
@@ -266,7 +269,7 @@ print(f"Average entropy (page-level): {avg_H:.6f} bits/token")
 # ─────────────── sliding-window entropy ───────────────────────
 if W <= 0:
     sys.exit("Window size W must be positive.")
-if N < W:
+elif N < W:
     print(
         f"\nWindow size W={W} exceeds sequence length N={N}; "
         "skipping sliding-window analysis."
@@ -277,13 +280,12 @@ else:
     # (average entropy within window, window index)
     windows = [(window_sum / W, 0)]
 
-    for start in range(N - W):
+    for i, start in enumerate(range(N - W), 1):
         window_sum += pos_entropy[start + W] - pos_entropy[start]
         windows.append(
-            (window_sum / W, start + 1)
-        )  # +1 so we do not overwrite last window_sum
+            (window_sum / W, i)
+        )
 
-    # pick top-M windows with largest average entropy (O(n))
     top_windows = heapq.nlargest(TOP_M, windows, key=lambda x: x[0])
 
     print(
