@@ -1,8 +1,7 @@
-from rapidfuzz.distance import Levenshtein
-
 """ 
 Calculates CER between OCR and GT.
 """
+from rapidfuzz.distance import Levenshtein
 
 def _levenshtein_distance(ocr, ground_truth):
      return Levenshtein.distance(ocr, ground_truth)
