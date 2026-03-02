@@ -8,6 +8,7 @@ from openai import OpenAI
 
 from normalization import *
 from metrics import cer
+from loader import load_text_pair
 
 
 # ─────────────── logging setup ────────────────────────────────
@@ -71,12 +72,20 @@ parser.add_argument(
     metavar="M",
     help="Show the M windows with the largest average entropy.",
 )
+parser.add_argument(
+    "--norm",
+    type=str,
+    default="all",
+    metavar="N",
+    help="Type of normalization (none/all/interactive) to apply to ocr and ground_truth text excerpts.",
+)
 args = parser.parse_args()
 
 # K logprobs to consider, W window size, TOP_M windows considered
 TOP_K = args.top_k
 W = args.window_size
 TOP_M = args.top_m
+NORM_TYPE = args.norm
 
 IMAGE_PATH = Path(os.path.join(os.getcwd(), args.image))
 if not IMAGE_PATH.exists():
@@ -95,6 +104,7 @@ def pretty(alts):
 
 def calculate_shannon_entropy(p):
     return p * math.log(p, 2)
+
 
 def make_full_latex(latex_output: str) -> str:
     """
@@ -136,8 +146,19 @@ def make_full_latex(latex_output: str) -> str:
 
     return header + cleaned + footer
 
+
 def get_probability(logprob):
     return math.exp(logprob)
+
+def get_page_id_from_path(path: Path):
+    return str(path).split("/")[-1][:-4] # trim ".tif", ".jpg", ".tex"
+
+def load_ground_truth(image_path: Path) -> str:
+    page_id = get_page_id_from_path(image_path)
+    _, gt = load_text_pair(page_id)
+    if gt is None:
+        raise ValueError(f"Ground truth returned None for page: {page_id}")
+    return gt.array[0]
 
 # ─────────────── OpenAI client ────────────────────────────────
 api_key = os.getenv("OPENAI_API_KEY")
@@ -184,11 +205,11 @@ def chat(msgs):
             return client.chat.completions.create(
                 model=MODEL,
                 messages=msgs,
-                temperature=0.5, # High = more creative, Low = more focused
-                top_p=0.9, # Model looks at the top 90% of tokens it generates
-                n=1, # Controls how much model repeats itself (-2 - 2, with '+' value being penalize for repetition
-                seed=12345, # Give same seed every run to try to make model responses predictable
-                max_tokens=10_000, # Highest # of tokens model will generate in response 
+                temperature=0.5,  # High = more creative, Low = more focused
+                top_p=0.9,  # Model looks at the top 90% of tokens it generates
+                n=1,  # Controls how much model repeats itself (-2 - 2, with '+' value being penalize for repetition
+                seed=12345,  # Give same seed every run to try to make model responses predictable
+                max_tokens=10_000,  # Highest # of tokens model will generate in response
                 logprobs=True,
                 top_logprobs=TOP_K,
             )
@@ -240,7 +261,7 @@ for info in tok_infos:
     top_k_logprobs = info.top_logprobs[:TOP_K]
     # loop through top k logprobs
     for alt in top_k_logprobs:
-        
+
         # Convert to probability value
         p = get_probability(alt.logprob)
         mass += p
@@ -284,7 +305,7 @@ else:
     i = W
     while i < N:
         window_sum = 0
-        window_sum = sum(pos_entropy[i:i+W])
+        window_sum = sum(pos_entropy[i : i + W])
         windows.append((window_sum, i))
         i += W
 
@@ -304,7 +325,9 @@ else:
     )
     for rank, (avg_w, start) in enumerate(top_windows, 1):
         end = start + W - 1
-        all_tokens_in_window = "".join(tok_infos[i].token for i in range(start, end + 1))
+        all_tokens_in_window = "".join(
+            tok_infos[i].token for i in range(start, end + 1)
+        )
         print(
             f"{rank:>2}. [{start:>3}–{end:>3}]  "
             f'avg H = {avg_w:.4f} bits/token  →  "{all_tokens_in_window}"'
@@ -337,7 +360,6 @@ except Exception as e:
     print(f"\nError writing log file: {e}")
 
 # ─────────────── CER calculation ───────────────────────────────
-# load ground-truth
 gt = load_ground_truth(IMAGE_PATH)
 norm_ocr, norm_gt = normalize_text(full_latex, gt)
 _cer = cer(norm_ocr, norm_gt)
