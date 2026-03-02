@@ -56,7 +56,7 @@ def load_bln600_metadata():
      
      return df
 
-def load_text_pair(page_id) -> pd.Series:
+def load_text_pair(page_id) -> tuple[pd.Series, pd.Series] | None:
      df = load_bln600_metadata()
      
      page_entry = df[df["page-id"] == page_id]
