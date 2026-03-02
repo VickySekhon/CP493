@@ -1,5 +1,5 @@
 """
-Shared pipeline of functions applied to OCR and GT to maintain fair and equal CER calcuation.
+Shared pipeline of functions applied to OCR and GT to maintain fair and equal CER calculation.
 """
 import re
 
