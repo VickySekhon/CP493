@@ -1,9 +1,9 @@
-import pandas as pd
-import os
-
 """
 Loads the BLN600 dataset and a page from the dataset based on it's ID.
 """
+
+import pandas as pd
+import os
 
 IMAGE_PATH = os.path.join(os.getcwd(), "data/images/")
 GT_PATH = os.path.join(os.getcwd(), "data/ground-truth/")
@@ -56,7 +56,7 @@ def load_bln600_metadata():
      
      return df
 
-def load_text_pair(page_id) -> tuple[pd.Series, pd.Series] | None:
+def load_text_pair(page_id: int) -> tuple[pd.Series, pd.Series] | None:
      df = load_bln600_metadata()
      
      page_entry = df[df["page-id"] == page_id]

@@ -75,6 +75,7 @@ parser.add_argument(
 parser.add_argument(
     "--norm",
     type=str,
+    choices=["none", "all", "interactive"],
     default="all",
     metavar="N",
     help="Type of normalization (none/all/interactive) to apply to ocr and ground_truth text excerpts.",
@@ -150,14 +151,14 @@ def make_full_latex(latex_output: str) -> str:
 def get_probability(logprob):
     return math.exp(logprob)
 
-def get_page_id_from_path(path: Path):
-    return str(path).split("/")[-1][:-4] # trim ".tif", ".jpg", ".tex"
+def get_page_id_from_path(path: Path) -> int:
+    return int(str(path).split("/")[-1][:-4]) # trim ".tif", ".jpg", ".tex"
 
-def load_ground_truth(image_path: Path) -> str:
-    page_id = get_page_id_from_path(image_path)
-    _, gt = load_text_pair(page_id)
-    if gt is None:
+def load_ground_truth(page_id: int) -> str:
+    pair = load_text_pair(page_id)
+    if pair is None:
         raise ValueError(f"Ground truth returned None for page: {page_id}")
+    _, gt = pair
     return gt.array[0]
 
 # ─────────────── OpenAI client ────────────────────────────────
@@ -360,6 +361,10 @@ except Exception as e:
     print(f"\nError writing log file: {e}")
 
 # ─────────────── CER calculation ───────────────────────────────
-gt = load_ground_truth(IMAGE_PATH)
-norm_ocr, norm_gt = normalize_text(full_latex, gt)
-_cer = cer(norm_ocr, norm_gt)
+PAGE_ID = get_page_id_from_path(IMAGE_PATH)
+
+gt = load_ground_truth(PAGE_ID)
+ocr, gt = normalize_text(full_latex, gt, NORM_TYPE)
+_cer = cer(ocr, gt)
+
+print(f"The CER between ocr and gt text excerpts for page: '{PAGE_ID}' is: {_cer:.2f}")
