@@ -96,16 +96,6 @@ def pretty(alts):
 def calculate_shannon_entropy(p):
     return p * math.log(p, 2)
 
-def load_ground_truth(path_to_image):
-    path_pieces = path_to_image.split("/")
-    path_pieces[1] = "ground-truth"
-    path_pieces[2] = path_to_image[2][:-4] + ".txt" # convert to gt path 
-    gt_path = "/".join(path_pieces)
-    
-    with open(gt_path, "r", encoding="utf-8") as _gt:
-        gt = _gt.read()
-    return gt
-
 def make_full_latex(latex_output: str) -> str:
     """
     Normalise the model’s LaTeX output.
