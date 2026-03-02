@@ -1,4 +1,4 @@
-# python3 src/scan2latex_entropy.py --top-k 1 --window-size 5 --top-m 10 data/images/3200797037.jpg
+# python3 src/scan2latex_entropy.py --top-k 1 --window-size 5 --top-m 10 --norm all data/images/3200797037.jpg
 
 #!/usr/bin/env python3
 import os, sys, time, math, base64, argparse, heapq, dotenv, io
