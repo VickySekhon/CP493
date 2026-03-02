@@ -6,6 +6,10 @@ from pathlib import Path
 from datetime import datetime
 from openai import OpenAI
 
+from normalization import *
+from metrics import cer
+from loader import load_text_pair
+
 
 # ─────────────── logging setup ────────────────────────────────
 class TeeOutput:
@@ -33,7 +37,7 @@ sys.stdout = _tee
 # ─────────────── configuration ───────────────────────────────
 MODEL = "gpt-4o"
 TOKEN_PRINT_LIMIT = 3  # diagnostics: how many tokens to show
-EXCLUDE_TOKENS = {"```", "python", "", " ", "\n", "latex", "json", "tag", ""}
+EXCLUDE_TOKENS = {"```", "python", "", " ", "\n", "latex", "json", "tag", "\\"}
 dotenv.load_dotenv()
 
 # ──────────────── CLI parser ────────────────────────────────────────
@@ -68,12 +72,21 @@ parser.add_argument(
     metavar="M",
     help="Show the M windows with the largest average entropy.",
 )
+parser.add_argument(
+    "--norm",
+    type=str,
+    choices=["none", "all", "interactive"],
+    default="all",
+    metavar="N",
+    help="Type of normalization (none/all/interactive) to apply to ocr and ground_truth text excerpts.",
+)
 args = parser.parse_args()
 
 # K logprobs to consider, W window size, TOP_M windows considered
 TOP_K = args.top_k
 W = args.window_size
 TOP_M = args.top_m
+NORM_TYPE = args.norm
 
 IMAGE_PATH = Path(os.path.join(os.getcwd(), args.image))
 if not IMAGE_PATH.exists():
@@ -135,6 +148,19 @@ def make_full_latex(latex_output: str) -> str:
     return header + cleaned + footer
 
 
+def get_probability(logprob):
+    return math.exp(logprob)
+
+def get_page_id_from_path(path: Path) -> int:
+    return int(str(path).split("/")[-1][:-4]) # trim ".tif", ".jpg", ".tex"
+
+def load_ground_truth(page_id: int) -> str:
+    pair = load_text_pair(page_id)
+    if pair is None:
+        raise ValueError(f"Ground truth returned None for page: {page_id}")
+    _, gt = pair
+    return gt.array[0]
+
 # ─────────────── OpenAI client ────────────────────────────────
 api_key = os.getenv("OPENAI_API_KEY")
 if api_key is None:
@@ -180,11 +206,11 @@ def chat(msgs):
             return client.chat.completions.create(
                 model=MODEL,
                 messages=msgs,
-                temperature=0.5, # High = more creative, Low = more focused
-                top_p=0.9, # Model looks at the top 90% of tokens it generates
-                n=1, # Controls how much model repeats itself (-2 - 2, with '+' value being penalize for repetition
-                seed=12345, # Give same seed ever run to try to make model responses predictable
-                max_tokens=10_000, # Highest # of tokens model will generate in response 
+                temperature=0.5,  # High = more creative, Low = more focused
+                top_p=0.9,  # Model looks at the top 90% of tokens it generates
+                n=1,  # Controls how much model repeats itself (-2 - 2, with '+' value being penalize for repetition
+                seed=12345,  # Give same seed every run to try to make model responses predictable
+                max_tokens=10_000,  # Highest # of tokens model will generate in response
                 logprobs=True,
                 top_logprobs=TOP_K,
             )
@@ -200,7 +226,6 @@ reply = choice.message.content.strip()
 print("\nAssistant reply (LaTeX only expected):\n")
 print(reply, "\n")
 
-
 # save LaTeX file next to the image
 full_latex = make_full_latex(reply)
 tex_file_path = IMAGE_PATH.with_suffix(".tex")
@@ -209,7 +234,6 @@ try:
     print(f"\nLaTeX output saved to: {tex_file_path}")
 except Exception as e:
     print(f"\nError writing LaTeX file: {e}")
-
 # ─────────────── collect & filter tokens ──────────────────────
 tok_infos = [
     t
@@ -238,10 +262,12 @@ for info in tok_infos:
     top_k_logprobs = info.top_logprobs[:TOP_K]
     # loop through top k logprobs
     for alt in top_k_logprobs:
-        # get the orignal probability
-        p = math.exp(alt.logprob)
+
+        # Convert to probability value
+        p = get_probability(alt.logprob)
         mass += p
 
+        # log(0) is undefined
         if p == 0.0:
             continue
 
@@ -249,7 +275,6 @@ for info in tok_infos:
 
     # Residual probability
     p_tail = 1.0 - mass
-
     if p_tail > 0.0:
         H_pos += calculate_shannon_entropy(p_tail)
 
@@ -266,7 +291,7 @@ print(f"Average entropy (page-level): {avg_H:.6f} bits/token")
 # ─────────────── sliding-window entropy ───────────────────────
 if W <= 0:
     sys.exit("Window size W must be positive.")
-if N < W:
+elif N < W:
     print(
         f"\nWindow size W={W} exceeds sequence length N={N}; "
         "skipping sliding-window analysis."
@@ -277,13 +302,22 @@ else:
     # (average entropy within window, window index)
     windows = [(window_sum / W, 0)]
 
-    for start in range(N - W):
-        window_sum += pos_entropy[start + W] - pos_entropy[start]
-        windows.append(
-            (window_sum / W, start + 1)
-        )  # +1 so we do not overwrite last window_sum
+    # avoid overlapping top windows
+    i = W
+    while i < N:
+        window_sum = 0
+        window_sum = sum(pos_entropy[i : i + W])
+        windows.append((window_sum, i))
+        i += W
 
-    # pick top-M windows with largest average entropy (O(n))
+    # for i, start in enumerate(range(N - W), 1):
+    #     for j in range(start + W, start + 2*W):
+    #         window_sum += pos_entropy[j] - pos_entropy[]
+    #     window_sum += pos_entropy[start + W] - pos_entropy[start]
+    #     windows.append(
+    #         (window_sum / W, i)
+    #     )
+
     top_windows = heapq.nlargest(TOP_M, windows, key=lambda x: x[0])
 
     print(
@@ -292,7 +326,9 @@ else:
     )
     for rank, (avg_w, start) in enumerate(top_windows, 1):
         end = start + W - 1
-        all_tokens_in_window = "".join(tok_infos[i].token for i in range(start, end + 1))
+        all_tokens_in_window = "".join(
+            tok_infos[i].token for i in range(start, end + 1)
+        )
         print(
             f"{rank:>2}. [{start:>3}–{end:>3}]  "
             f'avg H = {avg_w:.4f} bits/token  →  "{all_tokens_in_window}"'
@@ -323,3 +359,12 @@ try:
     print(f"\nLog saved to: {log_file}")
 except Exception as e:
     print(f"\nError writing log file: {e}")
+
+# ─────────────── CER calculation ───────────────────────────────
+PAGE_ID = get_page_id_from_path(IMAGE_PATH)
+
+gt = load_ground_truth(PAGE_ID)
+ocr, gt = normalize_text(full_latex, gt, NORM_TYPE)
+_cer = cer(ocr, gt)
+
+print(f"The CER between ocr and gt text excerpts for page: '{PAGE_ID}' is: {_cer:.2f}")
