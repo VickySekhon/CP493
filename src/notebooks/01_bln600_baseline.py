@@ -19,4 +19,4 @@ for i in range(PAGES_TO_LOAD):
      
      _cer = cer(ocr, gt)
      
-     print(f"Page ID: {page_id} has an CER of {_cer} between ocr and gt texts.")
+     print(f"Page ID: {page_id} has a CER of {_cer} between ocr and gt texts.")
