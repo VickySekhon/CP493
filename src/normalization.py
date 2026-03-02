@@ -42,6 +42,11 @@ def normalize_text(ocr, ground_truth):
     while user_input != "q":
         if not user_input.isdigit() or int(user_input) < 1 or int(user_input) > 4:
             print('Invalid option. You should enter a number from 1 to 4')
+            user_input = input("""Enter the type of normalization to apply to both ocr and gt ('q' to quit):
+1. Whitespaces
+2. Quotes and dashes
+3. Punctuation
+4. Lowercase\nEntry: """)
             continue
         user_input = int(user_input)
         if user_input == 1:
