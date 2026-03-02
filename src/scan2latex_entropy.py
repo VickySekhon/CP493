@@ -27,69 +27,6 @@ class TeeOutput:
 
     def get_log(self):
         return self.buffer.getvalue()
-
-# Redirect stdout to capture all print statements
-_tee = TeeOutput(sys.stdout)
-sys.stdout = _tee
-
-# ─────────────── configuration ───────────────────────────────
-MODEL = "gpt-4o"
-TOKEN_PRINT_LIMIT = 3  # diagnostics: how many tokens to show
-EXCLUDE_TOKENS = {"```", "python", "", " ", "\n", "latex", "json", "tag", "\\"}
-dotenv.load_dotenv()
-
-# ──────────────── CLI parser ────────────────────────────────────────
-parser = argparse.ArgumentParser(
-    description=(
-        "Convert a scanned page to LaTeX (auto-adds a standard "
-        "document header/footer unless the output already starts "
-        "with \\documentclass) and analyse token-level Shannon "
-        "entropy (whole sequence + sliding windows)."
-    )
-)
-
-parser.add_argument("image", type=str, help="Path to the JPEG/PNG/PDF page to process")
-parser.add_argument(
-    "--top-k",
-    type=int,
-    default=5,
-    metavar="K",
-    help="Number of alternative tokens to request (1–20).",
-)
-parser.add_argument(
-    "--window-size",
-    type=int,
-    default=20,
-    metavar="W",
-    help="Sliding-window size in tokens.",
-)
-parser.add_argument(
-    "--top-m",
-    type=int,
-    default=3,
-    metavar="M",
-    help="Show the M windows with the largest average entropy.",
-)
-parser.add_argument(
-    "--norm",
-    type=str,
-    choices=["none", "all", "interactive"],
-    default="all",
-    metavar="N",
-    help="Type of normalization (none/all/interactive) to apply to ocr and ground_truth text excerpts.",
-)
-args = parser.parse_args()
-
-# K logprobs to consider, W window size, TOP_M windows considered
-TOP_K = args.top_k
-W = args.window_size
-TOP_M = args.top_m
-NORM_TYPE = args.norm
-
-IMAGE_PATH = Path(os.path.join(os.getcwd(), args.image))
-if not IMAGE_PATH.exists():
-    sys.exit(f"Error reading image. Path: '{IMAGE_PATH}' was not found.")
-
 # ─────────────── helper functions ──────────────────────────────────────
 def encode_image(path: str) -> str:
     with open(path, "rb") as fh:
@@ -106,9 +43,9 @@ def make_full_latex(latex_output: str) -> str:
     Normalise the model’s LaTeX output.
 
     1.  Strip any ```latex … ``` (or plain ```) fence placed by the model.
-    2.  If the cleaned text already contains a \documentclass directive
+    2.  If the cleaned text already contains a \\documentclass directive
         (i.e. it is a complete document), return it unchanged.
-    3.  Otherwise, wrap the body in a minimal pre-amble and \end{document}
+    3.  Otherwise, wrap the body in a minimal pre-amble and \\end{document}
         footer so that the result compiles as a stand-alone file.
     """
     import re
@@ -155,11 +92,11 @@ def load_ground_truth(page_id: int) -> str:
     return gt.array[0]
 
 # ─────────────── OpenAI client ────────────────────────────────
-def chat(msgs, client):
+def chat(msgs, client, model, top_k):
     while True:
         try:
             return client.chat.completions.create(
-                model=MODEL,
+                model=model,
                 messages=msgs,
                 temperature=0.5,  # High = more creative, Low = more focused
                 top_p=0.9,  # Model looks at the top 90% of tokens it generates
@@ -167,14 +104,14 @@ def chat(msgs, client):
                 seed=12345,  # Give same seed every run to try to make model responses predictable
                 max_tokens=10_000,  # Highest # of tokens model will generate in response
                 logprobs=True,
-                top_logprobs=TOP_K,
+                top_logprobs=top_k,
             )
         except Exception as e:
             print(f"Error: {e} – retrying in 5 s")
             time.sleep(5)
 
 # ─────────────── per-token entropy + totals ───────────────────
-def calculate_entropy(tok_infos, N):
+def calculate_entropy(tok_infos, N, top_k):
     total_H = 0.0
     # Store entropy of each position for sliding window
     pos_entropy = []
@@ -183,7 +120,7 @@ def calculate_entropy(tok_infos, N):
     for info in tok_infos:
         H_pos, mass = 0.0, 0.0
 
-        top_k_logprobs = info.top_logprobs[:TOP_K]
+        top_k_logprobs = info.top_logprobs[:top_k]
         # loop through top k logprobs
         for alt in top_k_logprobs:
 
@@ -212,7 +149,7 @@ def calculate_entropy(tok_infos, N):
     return total_H, avg_H, pos_entropy
 
 # ─────────────── sliding-window entropy ───────────────────────
-def sliding_window(pos_entropy, N):
+def sliding_window(pos_entropy, N, W, top_m):
     # running window sum for O(N) computation
     window_sum = sum(pos_entropy[:W])
     # (average entropy within window, window index)
@@ -234,12 +171,69 @@ def sliding_window(pos_entropy, N):
     #         (window_sum / W, i)
     #     )
 
-    top_windows = heapq.nlargest(TOP_M, windows, key=lambda x: x[0])
+    top_windows = heapq.nlargest(top_m, windows, key=lambda x: x[0])
     return top_windows
-
 
 if __name__ == "__main__":
     print("Starting program...")
+    
+    # Redirect stdout to capture all print statements
+    _tee = TeeOutput(sys.stdout)
+    sys.stdout = _tee
+    # ─────────────── configuration ───────────────────────────────
+    MODEL = "gpt-4o"
+    TOKEN_PRINT_LIMIT = 3  # diagnostics: how many tokens to show
+    EXCLUDE_TOKENS = {"```", "python", "", " ", "\n", "latex", "json", "tag", "\\"}
+    dotenv.load_dotenv()
+    # ──────────────── CLI parser ────────────────────────────────────────
+    parser = argparse.ArgumentParser(
+        description=(
+            "Convert a scanned page to LaTeX (auto-adds a standard "
+            "document header/footer unless the output already starts "
+            "with \\documentclass) and analyse token-level Shannon "
+            "entropy (whole sequence + sliding windows)."
+        )
+    )
+    parser.add_argument("image", type=str, help="Path to the JPEG/PNG/PDF page to process")
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=5,
+        metavar="K",
+        help="Number of alternative tokens to request (1–20).",
+    )
+    parser.add_argument(
+        "--window-size",
+        type=int,
+        default=20,
+        metavar="W",
+        help="Sliding-window size in tokens.",
+    )
+    parser.add_argument(
+        "--top-m",
+        type=int,
+        default=3,
+        metavar="M",
+        help="Show the M windows with the largest average entropy.",
+    )
+    parser.add_argument(
+        "--norm",
+        type=str,
+        choices=["none", "all", "interactive"],
+        default="all",
+        metavar="N",
+        help="Type of normalization (none/all/interactive) to apply to ocr and ground_truth text excerpts.",
+    )
+    args = parser.parse_args()
+    # K logprobs to consider, W window size, TOP_M windows considered
+    TOP_K = args.top_k
+    W = args.window_size
+    TOP_M = args.top_m
+    NORM_TYPE = args.norm
+
+    IMAGE_PATH = Path(os.path.join(os.getcwd(), args.image))
+    if not IMAGE_PATH.exists():
+        sys.exit(f"Error reading image. Path: '{IMAGE_PATH}' was not found.")
     # ─────────────── OpenAI client ────────────────────────────────
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key is None:
@@ -277,7 +271,7 @@ if __name__ == "__main__":
             ],
         },
     ]
-    resp = chat(messages, client)
+    resp = chat(messages, client, MODEL, TOP_K)
     choice = resp.choices[0]
     reply = choice.message.content.strip()
     print("\nAssistant reply (LaTeX only expected):\n")
@@ -307,7 +301,7 @@ if __name__ == "__main__":
     if N == 0:
         sys.exit("No tokens to analyse.")
         
-    total_H, avg_H, pos_entropy = calculate_entropy(tok_infos, N)
+    total_H, avg_H, pos_entropy = calculate_entropy(tok_infos, N, TOP_K)
     print(f"Token count: {N}")
     print(f"Total entropy across all {TOP_K} top-k for all {N} tokens: {total_H:.6f} bits")
     print(f"Average entropy (page-level): {avg_H:.6f} bits/token")
@@ -320,7 +314,7 @@ if __name__ == "__main__":
             "skipping sliding-window analysis."
         )
     else:
-        top_windows = sliding_window(pos_entropy, N)
+        top_windows = sliding_window(pos_entropy, N, W, TOP_M)
         
         print(
             f"\nTop {len(top_windows)} windows (size W={W}) "
