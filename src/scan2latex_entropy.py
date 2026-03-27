@@ -32,24 +32,28 @@ class TeeOutput:
         return self.buffer.getvalue()
 
 # ─────────────── OpenAI client ────────────────────────────────
-def chat(msgs, client, model, top_k, temperature=0.5, top_p=0.9, n=1, seed=12345, max_tokens=10_000):
-    while True:
+def chat(msgs, client, model, top_k, temperature=0.5, top_p=0.9, n=1, seed=12345, max_tokens=10_000, retries=10):
+    for attempt in range(retries):
         try:
-            return client.chat.completions.create(
-                model=model,
-                messages=msgs,
-                temperature=temperature, # High = more creative, Low = more focused
-                top_p=top_p, # Model looks at the top 90% of tokens it generates
-                n=n, # Controls how much model repeats itself (-2 - 2, with '+' value being penalize for repetition
-                seed=seed, # Give same seed every run to try to make model responses predictable
-                max_tokens=max_tokens, # Highest # of tokens model will generate in response
-                logprobs=True,
-                top_logprobs=top_k,
-            )
+            params = {
+                "model": model,
+                "messages": msgs,
+                # High = more creative, Low = more focused
+                "temperature": temperature,
+                # Model looks at the top 90% of tokens it generates
+                "top_p": top_p,
+                # Controls how much model repeats itself (-2 - 2, with '+' value being penalize for repetition
+                "n": n,
+                "seed": seed,
+                "max_tokens": max_tokens,
+                "logprobs": True,
+                "top_logprobs": top_k,
+            }
+            return client.chat.completions.create(**params)
         except Exception as e:
-            print(f"Error: {e} – retrying in 5 s")
+            print(f"Error: {e} – retrying in 5 seconds ({attempt + 1}/{retries})")
             time.sleep(5)
-
+    raise RuntimeError("Max retries exceeded for chat function.")
 # ─────────────── per-token entropy + totals ───────────────────
 def calculate_entropy(tok_infos, N, top_k):
     total_H = 0.0
