@@ -64,7 +64,19 @@ def load_text_pair(page_id: int) -> tuple[pd.Series, pd.Series] | None:
           return
      
      return page_entry["ocr_text"], page_entry["ground_truth"]
+
+def load_image(page_id=None, limit=5) -> list[str]:
+     df = load_bln600_metadata()
      
+     if page_id:
+          page_entry = df[df["page-id"] == page_id]
+          if page_entry.empty:
+               print(f"Page-id: {page_id} was not found.")
+               return
+          return page_entry["image"]
+
+     # No page provided, just load first 5
+     return list(df["image"].head(5))
 
 if __name__ == "__main__":
      x = load_text_pair(3200797037)
