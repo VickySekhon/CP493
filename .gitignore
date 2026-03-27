@@ -1,3 +1,8 @@
+# MY FILES FOR DEBUGGING PURPOSES
+data/log-probs/
+data/logs/
+src/my_local_code/
+
 # Byte-compiled / optimized / DLL files
 **/__pycache__
 *.py[codz]
