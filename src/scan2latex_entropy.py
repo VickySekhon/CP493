@@ -3,14 +3,15 @@ Loads a page excerpt, converts it into latex, and then runs sliding window analy
 
 Usage: <python3 src/scan2latex_entropy.py --top-k 1 --window-size 5 --top-m 10 --norm all data/images/3200797037.jpg>
 """
-import os, sys, time, math, base64, argparse, heapq, dotenv, io
+import os, sys, time, argparse, heapq, dotenv, io
 from pathlib import Path
 from datetime import datetime
 from openai import OpenAI
 
 from normalization import *
 from metrics import cer
-from loader import load_text_pair
+from utils import MODEL, TOKEN_PRINT_LIMIT, EXCLUDE_TOKENS
+from utils import pretty, get_page_id_from_path, load_ground_truth, make_full_latex, encode_image, calculate_shannon_entropy, get_probability
 
 # ─────────────── logging setup ────────────────────────────────
 class TeeOutput:
@@ -29,82 +30,19 @@ class TeeOutput:
 
     def get_log(self):
         return self.buffer.getvalue()
-# ─────────────── helper functions ──────────────────────────────────────
-def encode_image(path: str) -> str:
-    with open(path, "rb") as fh:
-        return base64.b64encode(fh.read()).decode("utf-8")
-
-def pretty(alts):
-    return ", ".join(f"{a.token!r}:{math.exp(a.logprob):.3f}" for a in alts)
-
-def calculate_shannon_entropy(p):
-    return p * math.log(p, 2)
-
-def make_full_latex(latex_output: str) -> str:
-    """
-    Normalise the model’s LaTeX output.
-
-    1.  Strip any ```latex … ``` (or plain ```) fence placed by the model.
-    2.  If the cleaned text already contains a \\documentclass directive
-        (i.e. it is a complete document), return it unchanged.
-    3.  Otherwise, wrap the body in a minimal pre-amble and \\end{document}
-        footer so that the result compiles as a stand-alone file.
-    """
-    import re
-
-    cleaned = latex_output.strip()
-
-    # remove ``` fences
-    fence_prefixes = ("```latex", "```tex", "```")
-    for prefix in fence_prefixes:
-        if cleaned.lower().startswith(prefix):
-            # drop the opening fence line
-            cleaned = cleaned[len(prefix) :].lstrip()
-            break
-
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3].rstrip()
-
-    # if already a full document, just return it
-    # We look for \documentclass anywhere (typically near the top).
-    if re.search(r"\\documentclass", cleaned):
-        return cleaned
-
-    # otherwise add minimal header & footer
-    header = (
-        "\\documentclass[12pt]{article}\n"
-        "\\usepackage{amsmath,amssymb,amsthm}\n\n"
-        "\\begin{document}\n\n"
-    )
-    footer = "\n\n\\end{document}\n"
-
-    return header + cleaned + footer
-
-def get_probability(logprob):
-    return math.exp(logprob)
-
-def get_page_id_from_path(path: Path) -> int:
-    return int(str(path).split("/")[-1][:-4]) # trim ".tif", ".jpg", ".tex"
-
-def load_ground_truth(page_id: int) -> str:
-    pair = load_text_pair(page_id)
-    if pair is None:
-        raise ValueError(f"Ground truth returned None for page: {page_id}")
-    _, gt = pair
-    return gt.array[0]
 
 # ─────────────── OpenAI client ────────────────────────────────
-def chat(msgs, client, model, top_k):
+def chat(msgs, client, model, top_k, temperature=0.5, top_p=0.9, n=1, seed=12345, max_tokens=10_000):
     while True:
         try:
             return client.chat.completions.create(
                 model=model,
                 messages=msgs,
-                temperature=0.5,  # High = more creative, Low = more focused
-                top_p=0.9,  # Model looks at the top 90% of tokens it generates
-                n=1,  # Controls how much model repeats itself (-2 - 2, with '+' value being penalize for repetition
-                seed=12345,  # Give same seed every run to try to make model responses predictable
-                max_tokens=10_000,  # Highest # of tokens model will generate in response
+                temperature=temperature, # High = more creative, Low = more focused
+                top_p=top_p, # Model looks at the top 90% of tokens it generates
+                n=n, # Controls how much model repeats itself (-2 - 2, with '+' value being penalize for repetition
+                seed=seed, # Give same seed every run to try to make model responses predictable
+                max_tokens=max_tokens, # Highest # of tokens model will generate in response
                 logprobs=True,
                 top_logprobs=top_k,
             )
@@ -183,9 +121,6 @@ if __name__ == "__main__":
     _tee = TeeOutput(sys.stdout)
     sys.stdout = _tee
     # ─────────────── configuration ───────────────────────────────
-    MODEL = "gpt-4o"
-    TOKEN_PRINT_LIMIT = 3  # diagnostics: how many tokens to show
-    EXCLUDE_TOKENS = {"```", "python", "", " ", "\n", "latex", "json", "tag", "\\"}
     dotenv.load_dotenv()
     # ──────────────── CLI parser ────────────────────────────────────────
     parser = argparse.ArgumentParser(
