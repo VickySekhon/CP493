@@ -55,7 +55,7 @@ def load_bln600_metadata():
      
      return df
 
-def load_text_pair(page_id: int) -> tuple[pd.Series, pd.Series] | None:
+def load_text_pair(page_id: int) -> tuple[str, str] | None:
      df = load_bln600_metadata()
      
      page_entry = df[df["page-id"] == page_id]
@@ -63,7 +63,8 @@ def load_text_pair(page_id: int) -> tuple[pd.Series, pd.Series] | None:
           print(f"Page-id: {page_id} was not found.")
           return
      
-     return page_entry["ocr_text"], page_entry["ground_truth"]
+     # Return values directly
+     return page_entry["image"].iloc[0], page_entry["ground_truth"].iloc[0]
 
 def load_image(page_id=None, limit=5) -> list[str]:
      df = load_bln600_metadata()
@@ -81,6 +82,6 @@ def load_image(page_id=None, limit=5) -> list[str]:
 if __name__ == "__main__":
      x = load_text_pair(3200797037)
      if x:
-          ocr, gt = x
-          print(f"OCR: {ocr}")
+          image, gt = x
+          print(f"Image: {image}")
           print(f"GT: {gt}")

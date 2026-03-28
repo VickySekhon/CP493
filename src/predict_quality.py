@@ -1,0 +1,97 @@
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from loader import load_text_pair
+from logprobs_client import transcribe_with_logprobs
+from entropy import token_entropies_from_logprobs
+from metrics import cer, levenshtein_distance
+from normalization import normalize_text
+from utils import get_page_id_from_image, get_average_bits_per_token
+
+PAGES_TO_LOAD = 100
+NORMALIZATION_TYPE = "all"
+SCATTER_PLOT_CONFIG = {
+     "s": 20,
+     "marker": "o",
+     "color": "green",
+     "alpha": 0.6,
+}
+
+def predict_subset():
+     image_folder = os.path.join(os.getcwd(), "data/images")
+     page_ids = np.array([get_page_id_from_image(image) for image in os.listdir(image_folder)])
+     
+     # Get random sample
+     #np.random.shuffle(page_ids)
+     
+     data = []
+     for i in range(PAGES_TO_LOAD):
+          page_id = int(page_ids[i])
+          
+          image_path, ground_truth_text = load_text_pair(page_id)
+          generated_transcript_text, token_logprobs = transcribe_with_logprobs(image_path)
+          token_entropies = token_entropies_from_logprobs(token_logprobs)
+          
+          avg_bits_per_token = get_average_bits_per_token(token_entropies)
+          total_bits = sum(token_entropies)
+          n_tokens = len(token_entropies)
+          
+          generated_transcript_text_norm, ground_truth_text_norm = normalize_text(generated_transcript_text, ground_truth_text, NORMALIZATION_TYPE)
+          
+          calculated_cer = cer(generated_transcript_text_norm, ground_truth_text_norm)
+          calculated_levenshtein = levenshtein_distance(generated_transcript_text_norm, ground_truth_text_norm)
+          
+          row = {
+               "page_id": page_id,
+               "avg_bits_per_token": avg_bits_per_token,
+               "total_bits": total_bits,
+               "n_tokens": n_tokens,
+               "cer": calculated_cer,
+               "levenshtein": calculated_levenshtein,
+               "gt_length": len(ground_truth_text_norm),
+               "normalization_profile": NORMALIZATION_TYPE,
+          }
+          data.append(row)
+          print(f"Processed {i+1}/{PAGES_TO_LOAD} pages...")
+     
+     df = pd.DataFrame(data)
+     df.to_csv("results_subset.csv")
+
+def visualize_cer(filename):
+     cer_df = pd.read_csv(filename)
+     x_label, y_label = cer_df["avg_bits_per_token"], cer_df["cer"]
+     plt.figure(figsize=(10,6))
+     plt.scatter(x_label, y_label, **SCATTER_PLOT_CONFIG)
+     plt.xlabel("Entropy (bits per token)")
+     plt.ylabel("CER")
+     plt.title("The Relationship Between Entropy and CER in OCR")
+     plt.show()
+    
+def visualize_entropy_distribution(filename):
+     cer_df = pd.read_csv(filename)
+     data = cer_df["avg_bits_per_token"]
+     plt.figure(figsize=(10,6))
+     plt.hist(data, bins=PAGES_TO_LOAD, edgecolor="black")
+     plt.xlabel("Entropy Levels")
+     plt.ylabel("Frequency")
+     plt.title("Frequency of Entropy Across Tokens")
+     plt.show()
+     
+def compute_pearson():
+     return
+
+def compute_spearman():
+     return
+
+def compute_bootstrap_confidence_interval():
+     return
+     
+def main():
+     predict_subset()
+     #visualize_cer("results_subset.csv")
+     #visualize_entropy_distribution("results_subset.csv")
+     
+if __name__ == "__main__":
+     main()
