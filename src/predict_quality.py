@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from loader import load_text_pair
 from logprobs_client import transcribe_with_logprobs
@@ -13,12 +14,6 @@ from utils import get_page_id_from_image, is_repetitive, write_anomalies
 
 PAGES_TO_LOAD = 100
 NORMALIZATION_TYPE = "all"
-SCATTER_PLOT_CONFIG = {
-     "s": 20,
-     "marker": "o",
-     "color": "green",
-     "alpha": 0.6,
-}
 
 def predict_subset():
      image_folder = os.path.join(os.getcwd(), "data/images")
@@ -71,22 +66,25 @@ def predict_subset():
      return df
 
 def visualize_cer(df):
-     x_label, y_label = df["avg_bits_per_token"], df["cer"]
+     x, y = df["avg_bits_per_token"], df["cer"]
      plt.figure(figsize=(10,6))
-     plt.scatter(x_label, y_label, **SCATTER_PLOT_CONFIG)
-     plt.xlabel("Entropy (bits per token)")
-     plt.ylabel("CER")
-     plt.title("The Relationship Between Entropy and CER in OCR")
-     plt.show()
+     ax = sns.regplot(x=x, y=y, ci=None, line_kws={"color": "red"})
+     params = {
+          "xlabel":"Entropy (Average Bits Per Token)", 
+          "ylabel":"CER",
+          "title":"The Relationship Between Entropy (Average Bits Per Token) and CER in OCR Analysis",
+     }
+     ax.set(**params)
+     plt.savefig("figures/entropy_vs_cer_subset.png")
     
 def visualize_entropy_distribution(df):
      data = df["avg_bits_per_token"]
      plt.figure(figsize=(10,6))
      plt.hist(data, bins=PAGES_TO_LOAD, edgecolor="black")
-     plt.xlabel("Entropy Levels")
-     plt.ylabel("Frequency")
-     plt.title("Frequency of Entropy Across Tokens")
-     plt.show()
+     plt.xlabel("Entropy (Average Bits Per Token)")
+     plt.ylabel("Frequency of Entropy Level")
+     plt.title("Distribution of Entropy Across Data")
+     plt.savefig("figures/entropy_distribution.png")
      
 def compute_pearson(x, y):
      statistic, _ = stats.pearsonr(x, y)
@@ -96,9 +94,16 @@ def compute_spearman(x, y):
      statistic, _ = stats.spearmanr(x, y)
      return statistic
 
-def compute_bootstrap_confidence_interval():
-     
-     return
+def compute_bootstrap_confidence_interval(df: pd.DataFrame, resample_count, sample_size):
+     total_r = []
+     for _ in range(resample_count):
+          sample = df.sample(sample_size, replace=True)
+          x, y = sample["avg_bits_per_token"], sample["cer"]
+          r = compute_pearson(x, y)
+          total_r.append(r)
+     ci_lower_bound = np.percentile(total_r, 2.5)
+     ci_upper_bound = np.percentile(total_r, 97.5)
+     return ci_lower_bound, ci_upper_bound
      
 def main():
      # df = predict_subset()
@@ -106,10 +111,12 @@ def main():
      visualize_cer(df)
      visualize_entropy_distribution(df)
      x, y = df["avg_bits_per_token"], df["cer"]
-     pearson_coefficient = compute_pearson(x, y)
-     spearman_coefficient = compute_spearman(x, y)
-     print(f"Pearson Correlation Coefficient: {pearson_coefficient:.3f}\nSpearman Correlation Coefficient: {spearman_coefficient:.3f}")
-     
+     r = compute_pearson(x, y)
+     p = compute_spearman(x, y)
+     print(f"Pearson Correlation Coefficient: {r:.3f}\nSpearman Correlation Coefficient: {p:.3f}")
+     resample_count, sample_size = 1000, PAGES_TO_LOAD
+     ci_lower_bound, ci_upper_bound = compute_bootstrap_confidence_interval(df, resample_count, sample_size)
+     print(f"Across {resample_count} resamples of size {sample_size}, 95% of the computed 'r' values lie between range ({ci_lower_bound:.3f}, {ci_upper_bound:.3f})\nOur computed value of 'r' on an initial {sample_size:.3f} samples was {r}")
      
 if __name__ == "__main__":
      main()
