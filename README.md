@@ -59,3 +59,16 @@ Correlations
 Confidence Intervals
 - Bootstrap CI
     * Instead of assuming data follows normal distribution, you re-sample points and compute a statistic on them, and then compute the tails based on your CI to get the range in which 'CI' amount of your computed statistic values lie
+
+TESTS:
+- https://www.diffchecker.com/szQ35Wnw/ (normalized)
+- https://www.diffchecker.com/8wySsLjv/ (anomaly difference)
+
+CER:
+0.0 – 0.05 → excellent OCR (modern, clean documents)
+0.05 – 0.15 → decent OCR (some noise/degradation)
+0.15 – 0.40 → poor OCR (historical, degraded, low quality scans)
+0.40+ → very poor (heavily damaged, unusual scripts, bad scans)
+
+OUTLIER:
+* GPT-4 failure mode called repetition loop causing the 8.1 CER anomaly
