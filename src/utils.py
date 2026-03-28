@@ -40,6 +40,9 @@ def get_probability(logprob):
 def get_page_id_from_path(path: Path) -> int:
     return int(str(path).split("/")[-1][:-4]) # trim ".tif", ".jpg", ".tex"
 
+def get_page_id_from_image(image: str) -> int:
+     return int(image[:-4])
+
 def load_ground_truth(page_id: int) -> str:
     pair = load_text_pair(page_id)
     if pair is None:
@@ -101,6 +104,20 @@ def get_token_logprobs(choice, top_k):
           obj["alts"] = alts
           token_logprobs.append(obj)
      return token_logprobs
+
+def write_anomalies(page_id, ocr, ground_truth):
+     dump = f"PAGE ID: {page_id}\nOCR:\n{ocr}\n\nGT:\n{ground_truth}"
+     with open("anomalies.txt", "a") as file:
+          file.write(dump)
+
+def is_repetitive(text, min_repeats=5):
+     lines = text.strip().splitlines()
+     if len(lines) < min_repeats:
+          return False
+     for i in range(len(lines) - min_repeats):
+          if len(set(lines[i:i+min_repeats])) == 1:
+               return True
+     return False
 
 def convert_all_tif_to_jpg():
      image_folder = os.path.join(os.getcwd(), "data/images")

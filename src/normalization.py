@@ -3,6 +3,10 @@ Shared pipeline of functions applied to OCR and GT to maintain fair and equal CE
 """
 import re
 
+from utils import load_cache_json
+from loader import load_text_pair
+from metrics import cer
+
 def normalize_whitespace(text: str) -> str:
     """Collapse all whitespace (spaces/newlines/tabs) to single spaces and strip ends."""
     return " ".join(text.split()).strip()
@@ -15,11 +19,14 @@ def normalize_quotes_and_dashes(text: str) -> str:
     # quotes
     text = text.replace('“', '"').replace('”', '"')
     text = text.replace('„', '"').replace('‟', '"')
-    text = text.replace('`', "'")  # backtick -> apostrophe
     text = text.replace("``", '"').replace("''", '"')
-    text = text.replace('‘', "'").replace('’', "'").replace('‚', "'")
+    
+    text = text.replace('`', "'")  # backtick -> apostrophe
+    text = text.replace('‘', "'").replace('’', "'")
+    
     # dashes: normalize em/en/triple-hyphen to a single hyphen
     text = text.replace('---', '-').replace('—', '-').replace('–', '-')
+    
     return text
 
 def strip_punctuation(text: str) -> str:
@@ -38,17 +45,8 @@ def normalize_text(ocr, ground_truth, normalization_type):
         return ocr, ground_truth
 
     if normalization_type == "all":
-        NORMALIZATION_PIPELINE = [
-            normalize_whitespace,
-            normalize_quotes_and_dashes,
-            strip_punctuation,
-            lowercase,
-        ]
-        for func in NORMALIZATION_PIPELINE:
-            ocr = func(ocr)
-            ground_truth = func(ground_truth)
-        return ocr, ground_truth
-        
+        return normalize_text_all(ocr, ground_truth)
+
     if normalization_type == "interactive":
         user_input = input("""Enter the type of normalization to apply to both ocr and gt ('q' to quit):
     1. Whitespaces
@@ -96,3 +94,24 @@ def normalize_text_all(ocr, ground_truth):
     ocr = lowercase(ocr)
     ground_truth = lowercase(ground_truth)
     return ocr, ground_truth
+
+def main():
+    page_id = 3206244093
+    cache_key = "3206244093_gpt-4o_5_1"
+    
+    cache = load_cache_json()
+    generated_text = cache[cache_key]["transcript"]
+    
+    _, ground_truth_text = load_text_pair(page_id)
+    
+    # generated_text, ground_truth_text = normalize_text_all(generated_text, ground_truth_text)
+    
+    _cer = cer(generated_text, ground_truth_text)
+    compare = f"Generated:\n{generated_text}\n\nGround Truth:\n{ground_truth_text}\n\nCER:\n{_cer}"
+    
+    with open("compare.txt", "w") as file:
+        file.write(compare)
+    return
+
+if __name__ == "__main__":
+    main()
