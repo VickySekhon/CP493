@@ -8,7 +8,7 @@ from logprobs_client import transcribe_with_logprobs
 from entropy import token_entropies_from_logprobs
 from metrics import cer, levenshtein_distance
 from normalization import normalize_text
-from utils import get_page_id_from_image, get_average_bits_per_token
+from utils import get_page_id_from_image, get_average_bits_per_token, is_repetitive, write_anomalies
 
 PAGES_TO_LOAD = 100
 NORMALIZATION_TYPE = "all"
@@ -24,7 +24,7 @@ def predict_subset():
      page_ids = np.array([get_page_id_from_image(image) for image in os.listdir(image_folder)])
      
      # Get random sample
-     #np.random.shuffle(page_ids)
+     # np.random.shuffle(page_ids)
      
      data = []
      for i in range(PAGES_TO_LOAD):
@@ -32,15 +32,24 @@ def predict_subset():
           
           image_path, ground_truth_text = load_text_pair(page_id)
           generated_transcript_text, token_logprobs = transcribe_with_logprobs(image_path)
+          
+          # GPT-4o sometimes reaches a failure mode called repetition loop causing it to repeat phrases nonsensically. These generations should not be included in our observation
+          if is_repetitive(generated_transcript_text):
+               # i + 2 since i + 1 represents current page
+               print(f"Found an anomaly! Skipping it and going directly to page: {i+2}")
+               write_anomalies(page_id, generated_transcript_text, ground_truth_text)
+               continue
+          
           token_entropies = token_entropies_from_logprobs(token_logprobs)
           
           avg_bits_per_token = get_average_bits_per_token(token_entropies)
           total_bits = sum(token_entropies)
           n_tokens = len(token_entropies)
-          
+               
           generated_transcript_text_norm, ground_truth_text_norm = normalize_text(generated_transcript_text, ground_truth_text, NORMALIZATION_TYPE)
           
           calculated_cer = cer(generated_transcript_text_norm, ground_truth_text_norm)
+
           calculated_levenshtein = levenshtein_distance(generated_transcript_text_norm, ground_truth_text_norm)
           
           row = {
@@ -89,9 +98,9 @@ def compute_bootstrap_confidence_interval():
      return
      
 def main():
-     predict_subset()
-     #visualize_cer("results_subset.csv")
-     #visualize_entropy_distribution("results_subset.csv")
+     #predict_subset()
+     visualize_cer("results_subset.csv")
+     visualize_entropy_distribution("results_subset.csv")
      
 if __name__ == "__main__":
      main()
