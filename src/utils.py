@@ -105,9 +105,6 @@ def get_token_logprobs(choice, top_k):
           token_logprobs.append(obj)
      return token_logprobs
 
-def get_average_bits_per_token(token_entropies):
-     return sum(token_entropies) / len(token_entropies)
-
 def write_anomalies(page_id, ocr, ground_truth):
      dump = f"PAGE ID: {page_id}\nOCR:\n{ocr}\n\nGT:\n{ground_truth}"
      with open("anomalies.txt", "a") as file:

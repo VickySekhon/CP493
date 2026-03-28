@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import scipy.stats as stats
 import matplotlib.pyplot as plt
 
 from loader import load_text_pair
@@ -8,7 +9,7 @@ from logprobs_client import transcribe_with_logprobs
 from entropy import token_entropies_from_logprobs
 from metrics import cer, levenshtein_distance
 from normalization import normalize_text
-from utils import get_page_id_from_image, get_average_bits_per_token, is_repetitive, write_anomalies
+from utils import get_page_id_from_image, is_repetitive, write_anomalies
 
 PAGES_TO_LOAD = 100
 NORMALIZATION_TYPE = "all"
@@ -42,9 +43,9 @@ def predict_subset():
           
           token_entropies = token_entropies_from_logprobs(token_logprobs)
           
-          avg_bits_per_token = get_average_bits_per_token(token_entropies)
           total_bits = sum(token_entropies)
           n_tokens = len(token_entropies)
+          avg_bits_per_token = total_bits / n_tokens
                
           generated_transcript_text_norm, ground_truth_text_norm = normalize_text(generated_transcript_text, ground_truth_text, NORMALIZATION_TYPE)
           
@@ -67,10 +68,10 @@ def predict_subset():
      
      df = pd.DataFrame(data)
      df.to_csv("results_subset.csv")
+     return df
 
-def visualize_cer(filename):
-     cer_df = pd.read_csv(filename)
-     x_label, y_label = cer_df["avg_bits_per_token"], cer_df["cer"]
+def visualize_cer(df):
+     x_label, y_label = df["avg_bits_per_token"], df["cer"]
      plt.figure(figsize=(10,6))
      plt.scatter(x_label, y_label, **SCATTER_PLOT_CONFIG)
      plt.xlabel("Entropy (bits per token)")
@@ -78,9 +79,8 @@ def visualize_cer(filename):
      plt.title("The Relationship Between Entropy and CER in OCR")
      plt.show()
     
-def visualize_entropy_distribution(filename):
-     cer_df = pd.read_csv(filename)
-     data = cer_df["avg_bits_per_token"]
+def visualize_entropy_distribution(df):
+     data = df["avg_bits_per_token"]
      plt.figure(figsize=(10,6))
      plt.hist(data, bins=PAGES_TO_LOAD, edgecolor="black")
      plt.xlabel("Entropy Levels")
@@ -88,19 +88,28 @@ def visualize_entropy_distribution(filename):
      plt.title("Frequency of Entropy Across Tokens")
      plt.show()
      
-def compute_pearson():
-     return
+def compute_pearson(x, y):
+     statistic, _ = stats.pearsonr(x, y)
+     return statistic
 
-def compute_spearman():
-     return
+def compute_spearman(x, y):
+     statistic, _ = stats.spearmanr(x, y)
+     return statistic
 
 def compute_bootstrap_confidence_interval():
+     
      return
      
 def main():
-     #predict_subset()
-     visualize_cer("results_subset.csv")
-     visualize_entropy_distribution("results_subset.csv")
+     # df = predict_subset()
+     df = pd.read_csv("results_subset.csv")
+     visualize_cer(df)
+     visualize_entropy_distribution(df)
+     x, y = df["avg_bits_per_token"], df["cer"]
+     pearson_coefficient = compute_pearson(x, y)
+     spearman_coefficient = compute_spearman(x, y)
+     print(f"Pearson Correlation Coefficient: {pearson_coefficient:.3f}\nSpearman Correlation Coefficient: {spearman_coefficient:.3f}")
+     
      
 if __name__ == "__main__":
      main()
