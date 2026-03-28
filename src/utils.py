@@ -108,6 +108,20 @@ def get_token_logprobs(choice, top_k):
 def get_average_bits_per_token(token_entropies):
      return sum(token_entropies) / len(token_entropies)
 
+def write_anomalies(page_id, ocr, ground_truth):
+     dump = f"PAGE ID: {page_id}\nOCR:\n{ocr}\n\nGT:\n{ground_truth}"
+     with open("anomalies.txt", "a") as file:
+          file.write(dump)
+
+def is_repetitive(text, min_repeats=5):
+     lines = text.strip().splitlines()
+     if len(lines) < min_repeats:
+          return False
+     for i in range(len(lines) - min_repeats):
+          if len(set(lines[i:i+min_repeats])) == 1:
+               return True
+     return False
+
 def convert_all_tif_to_jpg():
      image_folder = os.path.join(os.getcwd(), "data/images")
      original_filecount = len(os.listdir(image_folder))
