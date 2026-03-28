@@ -83,8 +83,6 @@ def calculate_entropy(tok_infos, N, top_k):
         if p_tail > 0.0:
             H_pos += calculate_shannon_entropy(p_tail)
 
-        # Convert entropy to positive
-        H_pos = -H_pos
         total_H += H_pos
         pos_entropy.append(H_pos)
 
