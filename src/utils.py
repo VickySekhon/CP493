@@ -8,7 +8,7 @@ from loader import load_text_pair
 
 MODEL = "gpt-4o"
 # Safe defaults, otherwise these are read from input
-TOP_K = 1
+TOP_K = 5
 WINDOW_SIZE = 5
 TOP_M = 10
 TOKEN_PRINT_LIMIT = 3
@@ -32,7 +32,7 @@ def pretty(alts):
     return ", ".join(f"{a.token!r}:{math.exp(a.logprob):.3f}" for a in alts)
 
 def calculate_shannon_entropy(p):
-    return p * math.log(p, 2)
+    return -p * math.log(p, 2)
 
 def get_probability(logprob):
     return math.exp(logprob)
@@ -78,7 +78,7 @@ def get_token_logprobs(choice, top_k):
      token_logprobs = []
      # Iterate through all tokens of response
      for logprob_obj in choice.logprobs.content:
-          if logprob_obj.token in EXCLUDE_TOKENS or not logprob_obj.token.strip():
+          if logprob_obj.token in EXCLUDE_TOKENS or not logprob_obj.token.strip() or logprob_obj.token.endswith("\n"):
                continue
                
           obj, logprobs, alts = {}, [0] * top_k, []
@@ -89,7 +89,7 @@ def get_token_logprobs(choice, top_k):
                top_logprob = top_logprobs[i]
                
                token = top_logprob.token
-               probability = get_probability(top_logprob.logprob)
+               probability = top_logprob.logprob
                
                logprobs[i] = probability
                
