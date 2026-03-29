@@ -2,6 +2,7 @@
 Converts a page excerpt to plain text file and caches it.
 """
 import os
+import threading
 from pathlib import Path
 from scan2latex_entropy import encode_image, chat
 from utils import init_openai_client, get_page_id_from_path, get_cache_key, load_cache_json, get_token_logprobs, write_cache_json, convert_all_tif_to_jpg
@@ -10,16 +11,18 @@ from loader import load_image
 from utils import MODEL, TOP_K
 
 client = init_openai_client()
+_cache_lock = threading.Lock()
 
 def transcribe_with_logprobs(image_path, top_k=5, model=MODEL, prompt_version=1):
-    cache = load_cache_json()
-    
     page_id = get_page_id_from_path(image_path)
     cache_key = get_cache_key(page_id, model, top_k, prompt_version)
-    
-    value = cache.get(cache_key)
-    if value:
-        return value["transcript"], value["token_logprobs"]
+
+    # Fast cache check under lock
+    with _cache_lock:
+        cache = load_cache_json()
+        value = cache.get(cache_key)
+        if value:
+            return value["transcript"], value["token_logprobs"]
     
     encoded_image = encode_image(image_path)
 
@@ -73,10 +76,17 @@ def transcribe_with_logprobs(image_path, top_k=5, model=MODEL, prompt_version=1)
 
     transcript_text = choice.message.content.strip()
     token_logprobs = get_token_logprobs(choice, top_k)
-    
-    # Cache it
-    cache[cache_key] = {"transcript": transcript_text, "token_logprobs": token_logprobs}
-    successful = write_cache_json(cache)
+
+    # Cache write path: lock + reload to avoid overwriting concurrent updates
+    with _cache_lock:
+        cache = load_cache_json()
+        value = cache.get(cache_key)
+        if value:
+            # Another worker wrote this entry while we were waiting on API.
+            return value["transcript"], value["token_logprobs"]
+
+        cache[cache_key] = {"transcript": transcript_text, "token_logprobs": token_logprobs}
+        successful = write_cache_json(cache)
     if not successful:
         print(f"Transcribed file {page_id} was not written to cache.")
     
