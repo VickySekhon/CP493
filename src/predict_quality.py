@@ -4,59 +4,85 @@ import pandas as pd
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 from loader import load_text_pair
-from logprobs_client import transcribe_with_logprobs
+from logprobs_client import transcribe_with_logprobs, flush_cache_updates
 from entropy import token_entropies_from_logprobs, surprisal_from_logprobs
 from metrics import cer, levenshtein_distance
 from normalization import normalize_text
 from regression import get_misclassified_triage_decisions
-from utils import get_page_id_from_image, is_repetitive, write_anomalies
+from utils import get_page_id_from_image, is_repetitive, write_anomalies, load_cache_json
 
 from utils import YOUDEN_J
 
 NORMALIZATION_TYPE = "all"
 
-def predict_subset(top_k, max_pages, output):
-     image_folder = os.path.join(os.getcwd(), "data/images")
-     page_ids = np.array([get_page_id_from_image(image) for image in os.listdir(image_folder)])
-     page_total = len(page_ids)
-     # Get random sample
-     # np.random.shuffle(page_ids)
-     
-     data, i = [], 0
-     for page_id in page_ids:
-          if i == max_pages: break
-          
+_anomaly_lock = Lock()
+
+
+def _process_page(page_id: str, top_k: int, cache_snapshot: dict | None):
+     """Worker function to process a single page.
+
+     Returns (row_dict | None, local_cache_updates: dict).
+     """
+     local_cache: dict = {}
+
+     try:
           image_path, ground_truth_text = load_text_pair(page_id)
-          generated_transcript_text, token_logprobs = transcribe_with_logprobs(image_path, top_k)
-          
-          # # GPT-4o sometimes reaches a failure mode called repetition loop causing it to repeat phrases nonsensically. These generations should not be included in our observation
+
+          generated_transcript_text, token_logprobs = transcribe_with_logprobs(
+               image_path,
+               top_k,
+               cache_snapshot=cache_snapshot,
+               local_cache=local_cache,
+               persist_cache=False,
+          )
+
+          # GPT-4o sometimes reaches a failure mode called repetition loop causing it to repeat phrases nonsensically.
+          # These generations should not be included in our observation.
           # if is_repetitive(generated_transcript_text):
-          #      # i + 2 since i + 1 represents current page
-          #      print(f"Found an anomaly! Skipping it and going directly to page: {i+2}")
-          #      write_anomalies(page_id, generated_transcript_text, ground_truth_text)
-          #      continue
-          
+          #      print(f"Skipping page {page_id} due to repetitive OCR transcript.")
+          #      return None, local_cache
+
           token_surprisals = surprisal_from_logprobs(token_logprobs)
+          if not token_surprisals:
+               print(f"No surprisals for page {page_id} (skipping)")
+               return None, local_cache
+
           avg_surprisal_per_token = sum(token_surprisals) / len(token_surprisals)
-          
+
           token_entropies = token_entropies_from_logprobs(token_logprobs)
+          if not token_entropies:
+               print(f"No entropies for page {page_id} (skipping)")
+               return None, local_cache
+
           total_bits = sum(token_entropies)
           n_tokens = len(token_entropies)
           avg_bits_per_token = total_bits / n_tokens
-               
-          generated_transcript_text_norm, ground_truth_text_norm = normalize_text(generated_transcript_text, ground_truth_text, NORMALIZATION_TYPE)
-          
-          calculated_cer = cer(generated_transcript_text_norm, ground_truth_text_norm)
-          
-          if calculated_cer > 1:
-               print(f"Found an anomaly! OCR for {page_id} has a CER of {calculated_cer}. Skipping it and going directly to page: {i+2}")
-               write_anomalies(page_id, generated_transcript_text_norm, ground_truth_text_norm)
-               continue
 
-          calculated_levenshtein = levenshtein_distance(generated_transcript_text_norm, ground_truth_text_norm)
-          
+          generated_transcript_text_norm, ground_truth_text_norm = normalize_text(
+               generated_transcript_text, ground_truth_text, NORMALIZATION_TYPE
+          )
+
+          calculated_cer = cer(generated_transcript_text_norm, ground_truth_text_norm)
+          if calculated_cer > 1:
+               print(
+                    f"Found an anomaly! OCR for {page_id} has a CER of {calculated_cer}. Skipping it..."
+               )
+               with _anomaly_lock:
+                    write_anomalies(
+                         page_id,
+                         generated_transcript_text_norm,
+                         ground_truth_text_norm,
+                    )
+               return None, local_cache
+
+          calculated_levenshtein = levenshtein_distance(
+               generated_transcript_text_norm, ground_truth_text_norm
+          )
+
           row = {
                "page_id": page_id,
                "avg_bits_per_token": avg_bits_per_token,
@@ -68,10 +94,72 @@ def predict_subset(top_k, max_pages, output):
                "gt_length": len(ground_truth_text_norm),
                "normalization_profile": NORMALIZATION_TYPE,
           }
-          data.append(row)
-          print(f"Processed {i+1}/{page_total} pages (max = {max_pages})...")
-          i += 1
-     
+          return row, local_cache
+
+     except Exception as exc:  # noqa: BLE001
+          print(f"Error processing page {page_id}: {exc}")
+          return None, local_cache
+
+
+def predict_subset(top_k, max_pages, output, workers):
+     image_folder = os.path.join(os.getcwd(), "data/images")
+     page_ids = np.array(
+          [get_page_id_from_image(image) for image in os.listdir(image_folder)]
+     )
+     page_total = len(page_ids)
+
+     if max_pages is not None:
+          page_ids = page_ids[:max_pages]
+
+     print(
+          f"Preparing to process {len(page_ids)} pages with top-k={top_k} using {workers} workers"
+     )
+
+     # Take a snapshot of the cache once; workers use this read-only.
+     cache_snapshot = load_cache_json()
+
+     data = []
+     cache_updates: dict = {}
+
+     if workers is None or workers <= 1:
+          # Fallback to sequential processing.
+          i = 0
+          for page_id in page_ids:
+               row, local_cache = _process_page(page_id, top_k, cache_snapshot)
+               if row is not None:
+                    data.append(row)
+               cache_updates.update(local_cache)
+               i += 1
+               print(f"Processed {i}/{page_total} pages (max = {max_pages})...")
+     else:
+          with ThreadPoolExecutor(max_workers=workers) as executor:
+               future_to_page = {
+                    executor.submit(_process_page, page_id, top_k, cache_snapshot): page_id
+                    for page_id in page_ids
+               }
+
+               for i, future in enumerate(as_completed(future_to_page), start=1):
+                    page_id = future_to_page[future]
+                    try:
+                         row, local_cache = future.result()
+                    except Exception as exc:  # noqa: BLE001
+                         print(f"Page {page_id} generated an exception: {exc}")
+                         continue
+
+                    if row is not None:
+                         data.append(row)
+                    cache_updates.update(local_cache)
+
+                    if i % 10 == 0 or i == len(page_ids):
+                         print(
+                              f"Processed {i}/{len(page_ids)} pages (max = {max_pages})..."
+                         )
+
+     # Flush all cache updates once at the end.
+     flushed = flush_cache_updates(cache_updates)
+     if not flushed:
+          print("Warning: some cache updates may not have been written to disk.")
+
      df = pd.DataFrame(data)
      df.to_csv(f"{output}/results_k_{top_k}.csv")
      return df
@@ -110,7 +198,7 @@ def visualize_correlation_coefficient(x, y, coefficient, top_k):
           "title":f"Computed {coefficient} Correlation Coefficient Across Iterations",
      }
      ax.set(**params)
-     plt.savefig(f"figures/{coefficient.lower()}_k_{top_k}")
+     plt.savefig(f"figures/{coefficient.lower()}_k_{top_k}.png")
      
 def compute_pearson(x, y):
      statistic, _ = stats.pearsonr(x, y)
@@ -183,17 +271,23 @@ def main(indicator):
      parser.add_argument("--top-k", type=int, help="How many top logprobs to consider when computing entropy")
      parser.add_argument("--max-pages", type=int, help="Maximum number of pages to process")
      parser.add_argument("--output", type=str, help="Path (folder) to store output")
+     parser.add_argument("--workers", type=int, default=4, help="Number of worker threads for page-level parallelism")
      
      args = parser.parse_args()
-     top_k = args.top_k
+     top_k = args.top_k if args.top_k is not None else 5
      max_pages = args.max_pages
-     output = args.output
+     output = args.output if args.output is not None else "csvs"
+     workers = max(1, args.workers)
+
+     os.makedirs(output, exist_ok=True)
+     os.makedirs("figures", exist_ok=True)
      
+     print(f"Running with top-k={top_k}, max-pages={max_pages}, output={output}, workers={workers}")
      print(f"Running with top-k set to {top_k}")
      
      print(f"Using **{indicator}** as an indicator of CER")
      # df = pd.read_csv("results_subset.csv")
-     df = predict_subset(top_k, max_pages, output)
+     df = predict_subset(top_k, max_pages, output, workers)
      visualize_cer(df, top_k, indicator)
      visualize_entropy_vs_surprisal_as_predictor(df, top_k, YOUDEN_J, True)
      #visualize_entropy_distribution(df)
