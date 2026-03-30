@@ -114,15 +114,18 @@ def compute_bootstrap_confidence_interval(df: pd.DataFrame, resample_count, samp
           p = compute_spearman(x,y)
           total_r.append(r)
           total_p.append(p)
-     ci_lower_bound = np.percentile(total_r, 2.5)
-     ci_upper_bound = np.percentile(total_r, 97.5)
+     r_ci_lower_bound = np.percentile(total_r, 2.5)
+     r_ci_upper_bound = np.percentile(total_r, 97.5)
      
-     # Total_r and total_p are the same length, use one
-     x = [i for i in range(1,len(total_r)+1)]
-     visualize_correlation_coefficient(total_r, "Pearson", top_k)
-     visualize_correlation_coefficient(total_p, "Spearman", top_k)
+     p_ci_lower_bound = np.percentile(total_p, 2.5)
+     p_ci_upper_bound = np.percentile(total_p, 97.5)
      
-     return ci_lower_bound, ci_upper_bound
+     # Plot correlation values across bootstrap iterations.
+     x = [i for i in range(1, len(total_r) + 1)]
+     visualize_correlation_coefficient(x, total_r, "Pearson", top_k)
+     visualize_correlation_coefficient(x, total_p, "Spearman", top_k)
+     
+     return r_ci_lower_bound, r_ci_upper_bound, p_ci_lower_bound, p_ci_upper_bound
      
 def main():
      parser = argparse.ArgumentParser(description=("Run prediction pipeline on entire BLN600 dataset"))
@@ -146,8 +149,9 @@ def main():
      p = compute_spearman(x, y)
      print(f"Pearson Correlation Coefficient: {r:.3f}\nSpearman Correlation Coefficient: {p:.3f}")
      resample_count, sample_size = 1000, len(df)
-     ci_lower_bound, ci_upper_bound = compute_bootstrap_confidence_interval(df, resample_count, sample_size)
-     print(f"Across {resample_count} resamples of size {sample_size}, 95% of the computed 'r' values lie between range ({ci_lower_bound:.3f}, {ci_upper_bound:.3f})\nThe original computed value of 'r' on {sample_size:.3f} samples was {r}")
+     r_ci_lower_bound, r_ci_upper_bound, p_ci_lower_bound, p_ci_upper_bound = compute_bootstrap_confidence_interval(df, resample_count, sample_size, top_k)
+     print(f"Across {resample_count} resamples of size {sample_size}, 95% of the computed 'r' values lie between range ({r_ci_lower_bound:.3f}, {r_ci_upper_bound:.3f})\nThe original computed value of 'r' on {sample_size:.3f} samples was {r}")
+     print(f"Across {resample_count} resamples of size {sample_size}, 95% of the computed 'p' values lie between range ({p_ci_lower_bound:.3f}, {p_ci_upper_bound:.3f})\nThe original computed value of 'r' on {sample_size:.3f} samples was {p}")
      
 if __name__ == "__main__":
      main()
