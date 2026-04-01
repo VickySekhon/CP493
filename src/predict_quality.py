@@ -121,7 +121,7 @@ def compute_bootstrap_confidence_interval(df: pd.DataFrame, resample_count, samp
      p_ci_upper_bound = np.percentile(total_p, 97.5)
      
      # Plot correlation values across bootstrap iterations.
-     x = [i for i in range(1, len(total_r) + 1)]
+     x = [i for i in range(1, resample_count + 1)]
      visualize_correlation_coefficient(x, total_r, "Pearson", top_k)
      visualize_correlation_coefficient(x, total_p, "Spearman", top_k)
      
