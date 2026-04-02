@@ -28,11 +28,11 @@ def process_page(page_id, top_k, cache_snapshot):
           persist_cache=False,
      )
 
-     # GPT-4o sometimes reaches a failure mode called repetition loop causing it to repeat phrases nonsensically.
-     if is_repetitive(generated_transcript_text):
-          with _anomaly_lock:
-               write_anomalies(page_id, generated_transcript_text, ground_truth_text)
-          return None, local_cache
+     # # GPT-4o sometimes reaches a failure mode called repetition loop causing it to repeat phrases nonsensically.
+     # if is_repetitive(generated_transcript_text):
+     #      with _anomaly_lock:
+     #           write_anomalies(page_id, generated_transcript_text, ground_truth_text)
+     #      return None, local_cache
 
      token_entropies = token_entropies_from_logprobs(token_logprobs)
      n_tokens = len(token_entropies)
@@ -50,6 +50,12 @@ def process_page(page_id, top_k, cache_snapshot):
 
      calculated_cer = cer(generated_transcript_text_norm, ground_truth_text_norm)
      calculated_levenshtein = levenshtein_distance(generated_transcript_text_norm, ground_truth_text_norm)
+     
+     if calculated_cer > 1:
+          print(f"Found an anomaly! OCR for {page_id} has a CER of {calculated_cer}")
+          with _anomaly_lock:
+               write_anomalies(page_id, generated_transcript_text_norm, ground_truth_text_norm)
+          return None, local_cache
 
      row = {
           "page_id": page_id,
