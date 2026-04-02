@@ -28,12 +28,12 @@ def predict_subset(top_k, max_pages, output):
           image_path, ground_truth_text = load_text_pair(page_id)
           generated_transcript_text, token_logprobs = transcribe_with_logprobs(image_path, top_k)
           
-          # GPT-4o sometimes reaches a failure mode called repetition loop causing it to repeat phrases nonsensically. These generations should not be included in our observation
-          if is_repetitive(generated_transcript_text):
-               # i + 2 since i + 1 represents current page
-               print(f"Found an anomaly! Skipping it and going directly to page: {i+2}")
-               write_anomalies(page_id, generated_transcript_text, ground_truth_text)
-               continue
+          # # GPT-4o sometimes reaches a failure mode called repetition loop causing it to repeat phrases nonsensically. These generations should not be included in our observation
+          # if is_repetitive(generated_transcript_text):
+          #      # i + 2 since i + 1 represents current page
+          #      print(f"Found an anomaly! Skipping it and going directly to page: {i+2}")
+          #      write_anomalies(page_id, generated_transcript_text, ground_truth_text)
+          #      continue
           
           token_entropies = token_entropies_from_logprobs(token_logprobs)
           
@@ -44,6 +44,11 @@ def predict_subset(top_k, max_pages, output):
           generated_transcript_text_norm, ground_truth_text_norm = normalize_text(generated_transcript_text, ground_truth_text, NORMALIZATION_TYPE)
           
           calculated_cer = cer(generated_transcript_text_norm, ground_truth_text_norm)
+          
+          if calculated_cer > 1:
+               print(f"Found an anomaly! OCR for {page_id} has a CER of {calculated_cer}. Skipping it and going directly to page: {i+2}")
+               write_anomalies(page_id, generated_transcript_text_norm, ground_truth_text_norm)
+               continue
 
           calculated_levenshtein = levenshtein_distance(generated_transcript_text_norm, ground_truth_text_norm)
           
