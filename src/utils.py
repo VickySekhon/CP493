@@ -109,6 +109,7 @@ def write_anomalies(page_id, ocr, ground_truth):
      dump = f"PAGE ID: {page_id}\nOCR:\n{ocr}\n\nGT:\n{ground_truth}"
      with open("anomalies.txt", "a") as file:
           file.write(dump)
+          print(f"Wrote anomaly for: {page_id} to anomalies.txt")
 
 def is_repetitive(text, min_repeats=5):
      lines = text.strip().splitlines()
