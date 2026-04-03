@@ -10,7 +10,10 @@ from logprobs_client import transcribe_with_logprobs
 from entropy import token_entropies_from_logprobs, surprisal_from_logprobs
 from metrics import cer, levenshtein_distance
 from normalization import normalize_text
+from regression import get_misclassified_triage_decisions
 from utils import get_page_id_from_image, is_repetitive, write_anomalies
+
+from utils import YOUDEN_J
 
 NORMALIZATION_TYPE = "all"
 
@@ -150,6 +153,29 @@ def compute_stratified_correlations(stratified_df: pd.DataFrame, indicator):
           r = compute_pearson(x, y)
           p = compute_spearman(x, y)
           print(f"{quartile} (n={len(group)}): Pearson={r:.3f}, Spearman={p:.3f}")
+          
+def visualize_entropy_and_cer_across_page_lengths(stratified_df: pd.DataFrame):
+     fig, axes = plt.subplots(2, 2, figsize=(10,6))
+     for ax, (quartile, group) in zip(axes.flatten(), stratified_df.groupby("length_quartile")):
+          ax.scatter(group["avg_bits_per_token"], group["cer"])
+          ax.set_title(f"{quartile} n={len(group)}")
+          ax.set_xlabel("Entropy (Average Bits Per Token)")
+          ax.set_ylabel("CER")
+     fig.tight_layout(pad=2.0)
+     plt.savefig("figures/entropy_vs_cer_by_length.png")
+          
+def visualize_entropy_vs_surprisal_as_predictor(df: pd.DataFrame, top_k, threshold_type, use_primary=True):
+     correct, val_indices = get_misclassified_triage_decisions(top_k, use_primary, threshold_type)
+     # Validation set is only 20% of entire dataframe
+     val_df = df.loc[val_indices]
+     plt.figure(figsize=(10,6))
+     plt.scatter(val_df[correct]["avg_surprisal_per_token"], val_df[correct]["avg_bits_per_token"], color="green", label="Correct", alpha=0.6)
+     plt.scatter(val_df[~correct]["avg_surprisal_per_token"], val_df[~correct]["avg_bits_per_token"], color="red", label="Misclassified", alpha=0.6)
+     plt.legend()
+     plt.xlabel("Surprisal (Average)")
+     plt.ylabel("Entropy (Average Bits Per Token)")
+     plt.title("Entropy Vs Surprisal Scatter")
+     plt.savefig(f"figures/surprisal_vs_entropy.png")
 
 def main(indicator):
      parser = argparse.ArgumentParser(description=("Run prediction pipeline on entire BLN600 dataset"))
@@ -169,6 +195,7 @@ def main(indicator):
      # df = pd.read_csv("results_subset.csv")
      df = predict_subset(top_k, max_pages, output)
      visualize_cer(df, top_k, indicator)
+     visualize_entropy_vs_surprisal_as_predictor(df, top_k, YOUDEN_J, True)
      #visualize_entropy_distribution(df)
      x, y = df[f"{indicator}"], df["cer"]
      r = compute_pearson(x, y)
@@ -176,6 +203,7 @@ def main(indicator):
      print(f"Pearson Correlation Coefficient: {r:.3f}\nSpearman Correlation Coefficient: {p:.3f}")
      stratified_df = stratify_df(df)
      compute_stratified_correlations(stratified_df, indicator)
+     visualize_entropy_and_cer_across_page_lengths(stratified_df)
      resample_count, sample_size = 1000, len(df)
      r_ci_lower_bound, r_ci_upper_bound, p_ci_lower_bound, p_ci_upper_bound = compute_bootstrap_confidence_interval(df, resample_count, sample_size, top_k, indicator)
      print(f"Across {resample_count} resamples of size {sample_size}, 95% of the computed 'r' values lie between range ({r_ci_lower_bound:.3f}, {r_ci_upper_bound:.3f})\nThe original computed value of 'r' on {sample_size:.3f} samples was {r}")
