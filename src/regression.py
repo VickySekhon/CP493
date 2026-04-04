@@ -1,3 +1,8 @@
+"""
+Trains a logistic regression model on entropy data to classify pages as good or bad based on CER thresholds,
+computes performance metrics including AUC, ROC curves, and evaluates thresholds using Youden's J or minimum error methods.
+"""
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,7 +21,7 @@ def add_labels(top_k):
     return df
 
 
-def train_logistic_regression_model(df, primary: bool, random_state=50):
+def train_logistic_regression_model(df, primary: bool = False, random_state=50):
     x = np.asarray(df["avg_bits_per_token"]).reshape(-1, 1)
     if primary:
         y = np.asarray(df["good_page_primary"])
@@ -46,16 +51,16 @@ def compute_roc_curve(p_hat, true_class):
     return false_positive_rate, true_positive_rate, threshold
 
 
-def plot_roc_curve(fpr, tpr, primary: bool):
+def plot_roc_curve(fpr, tpr, primary: bool, top_k):
     plt.figure(figsize=(10, 6))
     plt.plot(fpr, tpr, marker="o", markersize=3, alpha=0.5)
     plt.xlabel("False Positive Rate")
     plt.ylabel("True Positive Rate")
     if primary:
-        plt.title(f"ROC Curve for 1% CER Threshold")
+        plt.title(f"The ROC Curve for a 1% CER Threshold")
     else:
-        plt.title(f"ROC Curve for 2% CER Threshold")
-    plt.savefig("figures/roc_entropy_good_page.png")
+        plt.title(f"The ROC Curve for a 2% CER Threshold")
+    plt.savefig(f"figures/roc_entropy_k_{top_k}.png")
 
 
 def compute_youden_j_threshold(thresholds, fpr, tpr):
@@ -86,27 +91,27 @@ def compute_sensitivity(tp, fn):
 def compute_specificity(tn, fp):
     return tn / (tn + fp)
 
-def get_misclassified_triage_decisions(top_k, use_primary, threshold_type):
-     df = add_labels(top_k)
-     p_hat, Y_val, val_indices = train_logistic_regression_model(df, use_primary)
-     fpr, tpr, thresholds = compute_roc_curve(p_hat, Y_val)
-     threshold = compute_threshold(thresholds, fpr, tpr, Y_val, threshold_type)
-     Y_pred = p_hat >= threshold
-     return (Y_pred == Y_val), val_indices
 
-def main():
-    # Changeable parameters
-    TOP_K, USE_PRIMARY = 10, True
-    if USE_PRIMARY:
+def get_misclassified_triage_decisions(top_k, use_primary, threshold_type):
+    df = add_labels(top_k)
+    p_hat, Y_val, val_indices = train_logistic_regression_model(df, use_primary)
+    fpr, tpr, thresholds = compute_roc_curve(p_hat, Y_val)
+    threshold = compute_threshold(thresholds, fpr, tpr, Y_val, threshold_type)
+    Y_pred = p_hat >= threshold
+    return (Y_pred == Y_val), val_indices
+
+
+def main(top_k, use_primary=False):
+    if use_primary:
         print(f"Running with 1% threshold")
     else:
         print(f"Running with 2% threshold")
 
-    df = add_labels(TOP_K)
-    p_hat, Y_val, _ = train_logistic_regression_model(df, USE_PRIMARY)
+    df = add_labels(top_k)
+    p_hat, Y_val, _ = train_logistic_regression_model(df, use_primary)
     auc = compute_auc(p_hat, Y_val)
     fpr, tpr, thresholds = compute_roc_curve(p_hat, Y_val)
-    plot_roc_curve(fpr, tpr, USE_PRIMARY)
+    plot_roc_curve(fpr, tpr, use_primary, top_k)
 
     table_data = []
     threshold_types = [YOUDEN_J, MIN_ERROR]
