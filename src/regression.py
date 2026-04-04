@@ -24,8 +24,8 @@ def train_logistic_regression_model(df, primary: bool, random_state=50):
         y = np.asarray(df["good_page_secondary"])
 
     # Implicitly shuffles data
-    X_train, X_val, Y_train, Y_val = train_test_split(
-        x, y, test_size=0.20, random_state=random_state
+    X_train, X_val, Y_train, Y_val, _, val_indices = train_test_split(
+        x, y, df.index, test_size=0.20, random_state=random_state
     )
 
     try:
@@ -34,7 +34,7 @@ def train_logistic_regression_model(df, primary: bool, random_state=50):
         raise e
 
     p_hat = clf.predict_proba(X_val)[:, 1]
-    return p_hat, Y_val
+    return p_hat, Y_val, val_indices
 
 
 def compute_auc(p_hat, true_class):
@@ -86,6 +86,13 @@ def compute_sensitivity(tp, fn):
 def compute_specificity(tn, fp):
     return tn / (tn + fp)
 
+def get_misclassified_triage_decisions(top_k, use_primary, threshold_type):
+     df = add_labels(top_k)
+     p_hat, Y_val, val_indices = train_logistic_regression_model(df, use_primary)
+     fpr, tpr, thresholds = compute_roc_curve(p_hat, Y_val)
+     threshold = compute_threshold(thresholds, fpr, tpr, Y_val, threshold_type)
+     Y_pred = p_hat >= threshold
+     return (Y_pred == Y_val), val_indices
 
 def main():
     # Changeable parameters
@@ -96,7 +103,7 @@ def main():
         print(f"Running with 2% threshold")
 
     df = add_labels(TOP_K)
-    p_hat, Y_val = train_logistic_regression_model(df, USE_PRIMARY)
+    p_hat, Y_val, _ = train_logistic_regression_model(df, USE_PRIMARY)
     auc = compute_auc(p_hat, Y_val)
     fpr, tpr, thresholds = compute_roc_curve(p_hat, Y_val)
     plot_roc_curve(fpr, tpr, USE_PRIMARY)

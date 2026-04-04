@@ -37,6 +37,9 @@ def pretty(alts):
 def calculate_shannon_entropy(p):
     return -p * math.log(p, 2)
 
+def calculate_surprisal(p):
+     return -math.log(p, 2)
+
 def get_probability(logprob):
     return math.exp(logprob)
 

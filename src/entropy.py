@@ -1,7 +1,7 @@
 """
 Calculates per-token entropy and entropy for all tokens of an excerpt.
 """
-from utils import calculate_shannon_entropy, load_cache_json, get_probability
+from utils import calculate_shannon_entropy, calculate_surprisal, load_cache_json, get_probability 
 
 # Calculates the entropy of a single token
 def topk_tail_entropy(logprobs: list[float]) -> float:
@@ -27,6 +27,16 @@ def token_entropies_from_logprobs(token_logprobs):
           token_entropy = topk_tail_entropy(token_logprob["logprobs"])
           token_entropies.append(token_entropy)
      return token_entropies
+
+def surprisal_from_logprobs(token_logprobs):
+     assert token_logprobs != {}, "Cannot calculate surprisal from an empty token_logprobs object"
+     surprisals = []
+     for token_logprob in token_logprobs:
+          logprob_of_token_emitted = token_logprob["logprobs"][0]
+          token_probability = get_probability(logprob_of_token_emitted)
+          surprisal = calculate_surprisal(token_probability)
+          surprisals.append(surprisal)
+     return surprisals
 
 
 if __name__ == "__main__":
