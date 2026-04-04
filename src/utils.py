@@ -1,8 +1,13 @@
+"""
+Library of functions used by other scripts. Contains mathematical formulas, cache initialization logic, formatting utilities, etc.
+"""
+
 import os, math, base64, json
 from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 from PIL import Image
+import scipy.stats as stats
 
 from loader import load_text_pair
 
@@ -18,36 +23,45 @@ CACHE_PATH = "cache/cache.json"
 YOUDEN_J = "Youden J"
 MIN_ERROR = "Min Error"
 
+
 def init_openai_client():
-     load_dotenv()
-     
-     api_key = os.getenv("OPENAI_API_KEY")
-     if api_key is None:
-          raise ValueError("Please set the OPENAI_API_KEY environment variable.")
-     client = OpenAI(api_key=api_key)
-     return client
+    load_dotenv()
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key is None:
+        raise ValueError("Please set the OPENAI_API_KEY environment variable.")
+    client = OpenAI(api_key=api_key)
+    return client
+
 
 def encode_image(path: str) -> str:
     with open(path, "rb") as fh:
         return base64.b64encode(fh.read()).decode("utf-8")
 
+
 def pretty(alts):
     return ", ".join(f"{a.token!r}:{math.exp(a.logprob):.3f}" for a in alts)
+
 
 def calculate_shannon_entropy(p):
     return -p * math.log(p, 2)
 
+
 def calculate_surprisal(p):
-     return -math.log(p, 2)
+    return -math.log(p, 2)
+
 
 def get_probability(logprob):
     return math.exp(logprob)
 
+
 def get_page_id_from_path(path: Path) -> int:
-    return int(str(path).split("/")[-1][:-4]) # trim ".tif", ".jpg", ".tex"
+    return int(str(path).split("/")[-1][:-4])  # trim ".tif", ".jpg", ".tex"
+
 
 def get_page_id_from_image(image: str) -> int:
-     return int(image[:-4])
+    return int(image[:-4])
+
 
 def load_ground_truth(page_id: int) -> str:
     pair = load_text_pair(page_id)
@@ -56,108 +70,132 @@ def load_ground_truth(page_id: int) -> str:
     _, gt = pair
     return gt.array[0]
 
+
+def compute_pearson(x, y):
+    statistic, _ = stats.pearsonr(x, y)
+    return statistic
+
+
+def compute_spearman(x, y):
+    statistic, _ = stats.spearmanr(x, y)
+    return statistic
+
+
 def get_cache_key(page_id, model, top_k, prompt_version):
-     return f"{page_id}_{model}_{top_k}_{prompt_version}"
+    return f"{page_id}_{model}_{top_k}_{prompt_version}"
+
 
 def load_cache_json() -> dict:
-     current_path = os.getcwd()
-     cache_file = os.path.join(current_path, CACHE_PATH)
+    current_path = os.getcwd()
+    cache_file = os.path.join(current_path, CACHE_PATH)
 
-     try:
-          with open(cache_file, "r", encoding="utf-8") as file:      
-               cache = json.load(file)
-     except json.JSONDecodeError:
-          print("Cache is empty, returning empty dictionary instead")
-          return {}
-     return cache
+    try:
+        with open(cache_file, "r", encoding="utf-8") as file:
+            cache = json.load(file)
+    except json.JSONDecodeError:
+        print("Cache is empty, returning empty dictionary instead")
+        return {}
+    return cache
+
 
 def write_cache_json(mutated_obj) -> bool:
-     current_path = os.getcwd()
-     cache_file = os.path.join(current_path, CACHE_PATH)
-     
-     try:
-          with open(cache_file, "w", encoding="utf-8") as file:
-               json.dump(mutated_obj, file, indent=4)
-     except Exception as e:
-          print(f"Error writing to cache: {e}")
-          return False
-     return True
+    current_path = os.getcwd()
+    cache_file = os.path.join(current_path, CACHE_PATH)
+
+    try:
+        with open(cache_file, "w", encoding="utf-8") as file:
+            json.dump(mutated_obj, file, indent=4)
+    except Exception as e:
+        print(f"Error writing to cache: {e}")
+        return False
+    return True
+
 
 def get_token_logprobs(choice, top_k):
-     token_logprobs = []
-     # Iterate through all tokens of response
-     for logprob_obj in choice.logprobs.content:
-          if logprob_obj.token in EXCLUDE_TOKENS or not logprob_obj.token.strip() or logprob_obj.token.endswith("\n"):
-               continue
-               
-          obj, logprobs, alts = {}, [0] * top_k, []
-          top_logprobs = logprob_obj.top_logprobs
-          
-          # Iterate through all alternatives for this token
-          for i in range(top_k):
-               top_logprob = top_logprobs[i]
-               
-               token = top_logprob.token
-               probability = top_logprob.logprob
-               
-               logprobs[i] = probability
-               
-               alt = {"token": token, "logprob": probability}
-               alts.append(alt)
-          
-          obj["token"] = logprob_obj.token
-          obj["logprobs"] = logprobs
-          obj["alts"] = alts
-          token_logprobs.append(obj)
-     return token_logprobs
+    token_logprobs = []
+    # Iterate through all tokens of response
+    for logprob_obj in choice.logprobs.content:
+        if (
+            logprob_obj.token in EXCLUDE_TOKENS
+            or not logprob_obj.token.strip()
+            or logprob_obj.token.endswith("\n")
+        ):
+            continue
+
+        obj, logprobs, alts = {}, [0] * top_k, []
+        top_logprobs = logprob_obj.top_logprobs
+
+        # Iterate through all alternatives for this token
+        for i in range(top_k):
+            top_logprob = top_logprobs[i]
+
+            token = top_logprob.token
+            probability = top_logprob.logprob
+
+            logprobs[i] = probability
+
+            alt = {"token": token, "logprob": probability}
+            alts.append(alt)
+
+        obj["token"] = logprob_obj.token
+        obj["logprobs"] = logprobs
+        obj["alts"] = alts
+        token_logprobs.append(obj)
+    return token_logprobs
+
 
 def write_anomalies(page_id, ocr, ground_truth):
-     dump = f"PAGE ID: {page_id}\nOCR:\n{ocr}\n\nGT:\n{ground_truth}"
-     with open("anomalies.txt", "a") as file:
-          file.write(dump)
-          print(f"Wrote anomaly for: {page_id} to anomalies.txt")
+    dump = f"PAGE ID: {page_id}\nOCR:\n{ocr}\n\nGT:\n{ground_truth}"
+    with open("anomalies.txt", "a") as file:
+        file.write(dump)
+        print(f"Wrote anomaly for: {page_id} to anomalies.txt")
+
 
 def is_repetitive(text, min_repeats=5):
-     lines = text.strip().splitlines()
-     if len(lines) < min_repeats:
-          return False
-     for i in range(len(lines) - min_repeats):
-          if len(set(lines[i:i+min_repeats])) == 1:
-               return True
-     return False
+    lines = text.strip().splitlines()
+    if len(lines) < min_repeats:
+        return False
+    for i in range(len(lines) - min_repeats):
+        if len(set(lines[i : i + min_repeats])) == 1:
+            return True
+    return False
+
 
 def convert_all_tif_to_jpg():
-     image_folder = os.path.join(os.getcwd(), "data/images")
-     original_filecount = len(os.listdir(image_folder))
-     
-     for image_filename in os.listdir(image_folder):
-          image_path = os.path.join(image_folder, image_filename)
-          convert_tif_to_jpg(image_path)
-     
-     new_filecount = len(os.listdir(image_folder))
-     if original_filecount != new_filecount:
-          print(f"Some images were not correctly converted resulting in loss (filecount before: {original_filecount}, filecount after: {new_filecount})")
-          return
-     
-     print(f"Successfully converted")
+    image_folder = os.path.join(os.getcwd(), "data/images")
+    original_filecount = len(os.listdir(image_folder))
+
+    for image_filename in os.listdir(image_folder):
+        image_path = os.path.join(image_folder, image_filename)
+        convert_tif_to_jpg(image_path)
+
+    new_filecount = len(os.listdir(image_folder))
+    if original_filecount != new_filecount:
+        print(
+            f"Some images were not correctly converted resulting in loss (filecount before: {original_filecount}, filecount after: {new_filecount})"
+        )
+        return
+
+    print(f"Successfully converted")
+
 
 def convert_tif_to_jpg(file_path):
-     file_path = Path(file_path)
-     if file_path.suffix.lower() != ".tif":
-          print("Input file is not of .tif format. Did not convert it to JPG.")
-          return
-     try:
-          with Image.open(file_path) as file:
-               if file.mode != "RGB":
-                    file = file.convert("RGB")
-               new_path = file_path.with_suffix(".jpg")
-               # 90 quality is basically lossless
-               file.save(new_path, "JPEG", quality=90)
-               # Only delete .tif after .jpg is saved
-               file_path.unlink()
-     except OSError as e:
-          print(f"Error converting {file_path}: {e}")
-     
+    file_path = Path(file_path)
+    if file_path.suffix.lower() != ".tif":
+        print("Input file is not of .tif format. Did not convert it to JPG.")
+        return
+    try:
+        with Image.open(file_path) as file:
+            if file.mode != "RGB":
+                file = file.convert("RGB")
+            new_path = file_path.with_suffix(".jpg")
+            # 90 quality is basically lossless
+            file.save(new_path, "JPEG", quality=90)
+            # Only delete .tif after .jpg is saved
+            file_path.unlink()
+    except OSError as e:
+        print(f"Error converting {file_path}: {e}")
+
 
 def make_full_latex(latex_output: str) -> str:
     """

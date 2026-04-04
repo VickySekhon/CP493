@@ -1,14 +1,19 @@
 """
 Converts a page excerpt to plain text file and caches it.
 """
-import os
 import threading
-from pathlib import Path
 from scan2latex_entropy import encode_image, chat
-from utils import init_openai_client, get_page_id_from_path, get_cache_key, load_cache_json, get_token_logprobs, write_cache_json, convert_all_tif_to_jpg
+from utils import (
+    init_openai_client,
+    get_page_id_from_path,
+    get_cache_key,
+    load_cache_json,
+    get_token_logprobs,
+    write_cache_json,
+)
 from loader import load_image
 
-from utils import MODEL, TOP_K
+from utils import MODEL
 
 client = init_openai_client()
 _cache_lock = threading.Lock()
@@ -140,8 +145,7 @@ def transcribe_with_logprobs(
 
 if __name__ == "__main__":
     image_paths = load_image()
-    for path in image_paths:    
+    for path in image_paths:
         transcript_text, token_logprobs = transcribe_with_logprobs(path)
     print(transcript_text)
     print(token_logprobs)
-    

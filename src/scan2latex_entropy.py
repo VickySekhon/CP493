@@ -3,6 +3,7 @@ Loads a page excerpt, converts it into latex, and then runs sliding window analy
 
 Usage: <python3 src/scan2latex_entropy.py --top-k 1 --window-size 5 --top-m 10 --norm all data/images/3200797037.jpg>
 """
+
 import os, sys, time, argparse, heapq, dotenv, io
 from pathlib import Path
 from datetime import datetime
@@ -11,9 +12,16 @@ from openai import OpenAI
 from normalization import *
 from metrics import cer
 from utils import MODEL, TOKEN_PRINT_LIMIT, EXCLUDE_TOKENS
-from utils import pretty, get_page_id_from_path, load_ground_truth, make_full_latex, encode_image, calculate_shannon_entropy, get_probability
+from utils import (
+    pretty,
+    get_page_id_from_path,
+    load_ground_truth,
+    make_full_latex,
+    encode_image,
+    calculate_shannon_entropy,
+    get_probability,
+)
 
-# ─────────────── logging setup ────────────────────────────────
 class TeeOutput:
     """Captures all print output while also displaying to console."""
 
@@ -30,9 +38,18 @@ class TeeOutput:
 
     def get_log(self):
         return self.buffer.getvalue()
-
-# ─────────────── OpenAI client ────────────────────────────────
-def chat(msgs, client, model, top_k, temperature=0.5, top_p=0.9, n=1, seed=12345, max_tokens=10_000, retries=10):
+def chat(
+    msgs,
+    client,
+    model,
+    top_k,
+    temperature=0.5,
+    top_p=0.9,
+    n=1,
+    seed=12345,
+    max_tokens=10_000,
+    retries=10,
+):
     for attempt in range(retries):
         try:
             params = {
@@ -54,7 +71,7 @@ def chat(msgs, client, model, top_k, temperature=0.5, top_p=0.9, n=1, seed=12345
             print(f"Error: {e} – retrying in 5 seconds ({attempt + 1}/{retries})")
             time.sleep(5)
     raise RuntimeError("Max retries exceeded for chat function.")
-# ─────────────── per-token entropy + totals ───────────────────
+
 def calculate_entropy(tok_infos, N, top_k):
     total_H = 0.0
     # Store entropy of each position for sliding window
@@ -87,10 +104,9 @@ def calculate_entropy(tok_infos, N, top_k):
         pos_entropy.append(H_pos)
 
     avg_H = total_H / N
-    
+
     return total_H, avg_H, pos_entropy
 
-# ─────────────── sliding-window entropy ───────────────────────
 def sliding_window(pos_entropy, N, W, top_m):
     # running window sum for O(N) computation
     window_sum = sum(pos_entropy[:W])
@@ -105,26 +121,17 @@ def sliding_window(pos_entropy, N, W, top_m):
         windows.append((window_sum, i))
         i += W
 
-    # for i, start in enumerate(range(N - W), 1):
-    #     for j in range(start + W, start + 2*W):
-    #         window_sum += pos_entropy[j] - pos_entropy[]
-    #     window_sum += pos_entropy[start + W] - pos_entropy[start]
-    #     windows.append(
-    #         (window_sum / W, i)
-    #     )
-
     top_windows = heapq.nlargest(top_m, windows, key=lambda x: x[0])
     return top_windows
 
+
 if __name__ == "__main__":
     print("Starting program...")
-    
+
     # Redirect stdout to capture all print statements
     _tee = TeeOutput(sys.stdout)
     sys.stdout = _tee
-    # ─────────────── configuration ───────────────────────────────
     dotenv.load_dotenv()
-    # ──────────────── CLI parser ────────────────────────────────────────
     parser = argparse.ArgumentParser(
         description=(
             "Convert a scanned page to LaTeX (auto-adds a standard "
@@ -133,7 +140,9 @@ if __name__ == "__main__":
             "entropy (whole sequence + sliding windows)."
         )
     )
-    parser.add_argument("image", type=str, help="Path to the JPEG/PNG/PDF page to process")
+    parser.add_argument(
+        "image", type=str, help="Path to the JPEG/PNG/PDF page to process"
+    )
     parser.add_argument(
         "--top-k",
         type=int,
@@ -173,7 +182,6 @@ if __name__ == "__main__":
     IMAGE_PATH = Path(os.path.join(os.getcwd(), args.image))
     if not IMAGE_PATH.exists():
         sys.exit(f"Error reading image. Path: '{IMAGE_PATH}' was not found.")
-    # ─────────────── OpenAI client ────────────────────────────────
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key is None:
         raise ValueError("Please set the OPENAI_API_KEY environment variable.")
@@ -224,7 +232,7 @@ if __name__ == "__main__":
         print(f"\nLaTeX output saved to: {tex_file_path}")
     except Exception as e:
         print(f"\nError writing LaTeX file: {e}")
-    # ─────────────── collect & filter tokens ──────────────────────        
+    # ─────────────── collect & filter tokens ──────────────────────
     tok_infos = [
         t
         for t in choice.logprobs.content
@@ -239,12 +247,13 @@ if __name__ == "__main__":
     N = len(tok_infos)
     if N == 0:
         sys.exit("No tokens to analyse.")
-        
+
     total_H, avg_H, pos_entropy = calculate_entropy(tok_infos, N, TOP_K)
     print(f"Token count: {N}")
-    print(f"Total entropy across all {TOP_K} top-k for all {N} tokens: {total_H:.6f} bits")
+    print(
+        f"Total entropy across all {TOP_K} top-k for all {N} tokens: {total_H:.6f} bits"
+    )
     print(f"Average entropy (page-level): {avg_H:.6f} bits/token")
-    # ─────────────── sliding-window entropy ───────────────────────
     if W <= 0:
         sys.exit("Window size W must be positive.")
     elif N < W:
@@ -254,7 +263,7 @@ if __name__ == "__main__":
         )
     else:
         top_windows = sliding_window(pos_entropy, N, W, TOP_M)
-        
+
         print(
             f"\nTop {len(top_windows)} windows (size W={W}) "
             f"with highest average entropy:"
@@ -268,7 +277,6 @@ if __name__ == "__main__":
                 f"{rank:>2}. [{start:>3}–{end:>3}]  "
                 f'avg H = {avg_w:.4f} bits/token  →  "{all_tokens_in_window}"'
             )
-    # ─────────────── diagnostics: first / last tokens ─────────────
     head = tok_infos[:TOKEN_PRINT_LIMIT]
     tail = tok_infos[-TOKEN_PRINT_LIMIT:] if N > TOKEN_PRINT_LIMIT else []
 
@@ -280,7 +288,7 @@ if __name__ == "__main__":
         print(f"\nLast  {len(tail)} tokens (+ top-k probs):")
         for t in tail:
             print(f"  {t.token!r} → {pretty(t.top_logprobs)}")
-    # ─────────────── write log file ───────────────────────────────
+
     log_dir = Path(os.getcwd()) / "data" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -292,11 +300,12 @@ if __name__ == "__main__":
         print(f"\nLog saved to: {log_file}")
     except Exception as e:
         print(f"\nError writing log file: {e}")
-    # ─────────────── CER calculation ───────────────────────────────
     PAGE_ID = get_page_id_from_path(IMAGE_PATH)
 
     gt = load_ground_truth(PAGE_ID)
     ocr, gt = normalize_text(full_latex, gt, NORM_TYPE)
     _cer = cer(ocr, gt)
 
-    print(f"The CER between ocr and gt text excerpts for page: '{PAGE_ID}' is: {_cer:.2f}")
+    print(
+        f"The CER between ocr and gt text excerpts for page: '{PAGE_ID}' is: {_cer:.2f}"
+    )
